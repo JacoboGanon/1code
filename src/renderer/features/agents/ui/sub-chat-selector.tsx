@@ -811,7 +811,6 @@ export function SubChatSelector({
                       visualIndex={index}
                       hasTabsToRight={hasTabsToRight}
                       canCloseOtherTabs={openSubChats.length > 2}
-                      chatId={parentChatId}
                     />
                   </ContextMenu>
                 )

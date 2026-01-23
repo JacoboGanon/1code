@@ -60,9 +60,6 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-  ContextMenuSub,
-  ContextMenuSubTrigger,
-  ContextMenuSubContent,
 } from "../../components/ui/context-menu"
 import {
   IconDoubleChevronLeft,
@@ -111,7 +108,6 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { Checkbox } from "../../components/ui/checkbox"
 import { useHaptic } from "./hooks/use-haptic"
 import { TypewriterText } from "../../components/ui/typewriter-text"
-import { exportChat, copyChat, type ExportFormat } from "../agents/lib/export-chat"
 
 // Feedback URL: uses env variable for hosted version, falls back to public Discord for open source
 const FEEDBACK_URL =
@@ -691,30 +687,6 @@ const AgentChatItem = React.memo(function AgentChatItem({
                 Copy branch name
               </ContextMenuItem>
             )}
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>Export workspace</ContextMenuSubTrigger>
-              <ContextMenuSubContent sideOffset={6} alignOffset={-4}>
-                <ContextMenuItem onClick={() => exportChat({ chatId, format: "markdown" })}>
-                  Download as Markdown
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => exportChat({ chatId, format: "json" })}>
-                  Download as JSON
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => exportChat({ chatId, format: "text" })}>
-                  Download as Text
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => copyChat({ chatId, format: "markdown" })}>
-                  Copy as Markdown
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => copyChat({ chatId, format: "json" })}>
-                  Copy as JSON
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => copyChat({ chatId, format: "text" })}>
-                  Copy as Text
-                </ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => onArchive(chatId)} className="justify-between">
               Archive workspace
