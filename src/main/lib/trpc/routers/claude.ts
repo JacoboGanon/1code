@@ -1504,7 +1504,8 @@ ${prompt}
 
                 // When result arrives, assign the last assistant UUID to metadata
                 // It will be emitted as part of the merged message-metadata chunk below
-                if (msgAny.type === "result" && historyEnabled && lastAssistantUuid) {
+                // Guard: don't set on abort to prevent resumeSessionAt from pointing to incomplete message
+                if (msgAny.type === "result" && historyEnabled && lastAssistantUuid && !abortController.signal.aborted) {
                   metadata.sdkMessageUuid = lastAssistantUuid
                 }
 
@@ -1896,14 +1897,13 @@ ${prompt}
           activeSessions.delete(input.subChatId)
           clearPendingApprovals("Session ended.", input.subChatId)
 
-          // Save sessionId on abort so conversation can be resumed
-          // Clear streamId since we're no longer streaming
+          // Clear streamId since we're no longer streaming.
+          // sessionId is NOT saved here — the save block in the async function
+          // handles it (saves on normal completion, preserves on abort). This avoids
+          // a redundant DB write that could cause race conditions.
           const db = getDatabase()
           db.update(subChats)
-            .set({
-              streamId: null,
-              ...(currentSessionId && { sessionId: currentSessionId })
-            })
+            .set({ streamId: null })
             .where(eq(subChats.id, input.subChatId))
             .run()
         }
@@ -1964,9 +1964,9 @@ ${prompt}
         controller.abort()
         activeSessions.delete(input.subChatId)
         clearPendingApprovals("Session cancelled.", input.subChatId)
-        return { cancelled: true }
       }
-      return { cancelled: false }
+
+      return { cancelled: !!controller }
     }),
 
   /**
