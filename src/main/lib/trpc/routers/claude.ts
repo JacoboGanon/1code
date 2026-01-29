@@ -172,7 +172,7 @@ function mcpCacheKey(scope: string | null, serverName: string): string {
 const symlinksCreated = new Set<string>()
 
 // Cache for MCP config (avoid re-reading ~/.claude.json on every message)
-const mcpConfigCache = new Map<string, {
+export const mcpConfigCache = new Map<string, {
   config: Record<string, any> | undefined
   mtime: number
 }>()

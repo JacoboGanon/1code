@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useCallback } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
 /**
@@ -83,4 +83,32 @@ export function useGitWatcher(worktreePath: string | null | undefined) {
       }
     }
   }, [worktreePath, queryClient])
+}
+
+/**
+ * Hook that listens for ~/.claude.json changes and invalidates MCP config queries.
+ * This allows MCP servers to be re-initialized when the user edits their config
+ * without needing to restart the app or manually refresh.
+ */
+export function useClaudeConfigWatcher() {
+  const queryClient = useQueryClient()
+
+  const handleConfigChanged = useCallback(() => {
+    console.log("[useClaudeConfigWatcher] Config changed, invalidating MCP queries")
+
+    // Invalidate all MCP-related queries so they refetch fresh data
+    queryClient.invalidateQueries({
+      queryKey: [["claude", "getAllMcpConfig"]],
+    })
+    queryClient.invalidateQueries({
+      queryKey: [["claude", "getMcpConfig"]],
+    })
+  }, [queryClient])
+
+  useEffect(() => {
+    const cleanup = window.desktopApi?.onClaudeConfigChanged(handleConfigChanged)
+    return () => {
+      cleanup?.()
+    }
+  }, [handleConfigChanged])
 }

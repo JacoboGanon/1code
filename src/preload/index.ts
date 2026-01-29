@@ -216,6 +216,13 @@ contextBridge.exposeInMainWorld("desktopApi", {
   subscribeToGitWatcher: (worktreePath: string) => ipcRenderer.invoke("git:subscribe-watcher", worktreePath),
   unsubscribeFromGitWatcher: (worktreePath: string) => ipcRenderer.invoke("git:unsubscribe-watcher", worktreePath),
 
+  // Claude config change events (from ~/.claude.json watcher)
+  onClaudeConfigChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on("claude-config-changed", handler)
+    return () => ipcRenderer.removeListener("claude-config-changed", handler)
+  },
+
   // VS Code theme scanning
   scanVSCodeThemes: () => ipcRenderer.invoke("vscode:scan-themes"),
   loadVSCodeTheme: (themePath: string) => ipcRenderer.invoke("vscode:load-theme", themePath),
@@ -347,6 +354,8 @@ export interface DesktopApi {
   onGitStatusChanged: (callback: (data: { worktreePath: string; changes: Array<{ path: string; type: "add" | "change" | "unlink" }> }) => void) => () => void
   subscribeToGitWatcher: (worktreePath: string) => Promise<void>
   unsubscribeFromGitWatcher: (worktreePath: string) => Promise<void>
+  // Claude config changes (from ~/.claude.json watcher)
+  onClaudeConfigChanged: (callback: () => void) => () => void
   // VS Code theme scanning
   scanVSCodeThemes: () => Promise<DiscoveredTheme[]>
   loadVSCodeTheme: (themePath: string) => Promise<VSCodeThemeData>

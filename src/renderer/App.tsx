@@ -14,6 +14,7 @@ import {
   BillingMethodPage,
   SelectRepoPage,
 } from "./features/onboarding"
+import { useClaudeConfigWatcher } from "./lib/hooks/use-file-change-listener"
 import { identify, initAnalytics, shutdown } from "./lib/analytics"
 import {
   anthropicOnboardingCompletedAtom, apiKeyOnboardingCompletedAtom,
@@ -53,6 +54,9 @@ function AppContent() {
   const selectedProject = useAtomValue(selectedProjectAtom)
   const setSelectedChatId = useSetAtom(selectedAgentChatIdAtom)
   const { setActiveSubChat, addToOpenSubChats, setChatId } = useAgentSubChatStore()
+
+  // Watch ~/.claude.json for changes and auto-refresh MCP config
+  useClaudeConfigWatcher()
 
   // Apply initial window params (chatId/subChatId) when opening via "Open in new window"
   useEffect(() => {

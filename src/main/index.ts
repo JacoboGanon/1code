@@ -26,6 +26,7 @@ import {
   uninstallCli,
   parseLaunchDirectory,
 } from "./lib/cli"
+import { startClaudeConfigWatcher, stopClaudeConfigWatcher } from "./lib/claude-config-watcher"
 import { cleanupGitWatchers } from "./lib/git/watcher"
 import { cancelAllPendingOAuth, handleMcpOAuthCallback } from "./lib/mcp-auth"
 import {
@@ -877,6 +878,11 @@ if (gotTheLock) {
       }
     }, 3000)
 
+    // Watch ~/.claude.json for changes to auto-refresh MCP servers
+    startClaudeConfigWatcher().catch((error) => {
+      console.error("[App] Failed to start config watcher:", error)
+    })
+
     // Handle directory argument from CLI (e.g., `1code /path/to/project`)
     parseLaunchDirectory()
 
@@ -907,6 +913,7 @@ if (gotTheLock) {
   app.on("before-quit", async () => {
     console.log("[App] Shutting down...")
     cancelAllPendingOAuth()
+    await stopClaudeConfigWatcher()
     await cleanupGitWatchers()
     await shutdownAnalytics()
     await closeDatabase()
