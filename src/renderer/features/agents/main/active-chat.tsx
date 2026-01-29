@@ -2417,10 +2417,12 @@ const ChatViewInner = memo(function ChatViewInner({
   }, [isStreaming, subChatId, setLoadingSubChats])
 
   // Watch for pending PR message and send it
+  // Only the active tab should consume pending messages to prevent
+  // inactive ChatViewInner instances from stealing the message
   const [pendingPrMessage, setPendingPrMessage] = useAtom(pendingPrMessageAtom)
 
   useEffect(() => {
-    if (pendingPrMessage && !isStreaming) {
+    if (pendingPrMessage && !isStreaming && isActive) {
       // Clear the pending message immediately to prevent double-sending
       setPendingPrMessage(null)
 
@@ -2433,7 +2435,7 @@ const ChatViewInner = memo(function ChatViewInner({
       // Reset creating PR state after message is sent
       setIsCreatingPr(false)
     }
-  }, [pendingPrMessage, isStreaming, sendMessage, setPendingPrMessage])
+  }, [pendingPrMessage, isStreaming, isActive, sendMessage, setPendingPrMessage])
 
   // Watch for pending Review message and send it
   const [pendingReviewMessage, setPendingReviewMessage] = useAtom(
@@ -2441,7 +2443,7 @@ const ChatViewInner = memo(function ChatViewInner({
   )
 
   useEffect(() => {
-    if (pendingReviewMessage && !isStreaming) {
+    if (pendingReviewMessage && !isStreaming && isActive) {
       // Clear the pending message immediately to prevent double-sending
       setPendingReviewMessage(null)
 
@@ -2451,7 +2453,7 @@ const ChatViewInner = memo(function ChatViewInner({
         parts: [{ type: "text", text: pendingReviewMessage }],
       })
     }
-  }, [pendingReviewMessage, isStreaming, sendMessage, setPendingReviewMessage])
+  }, [pendingReviewMessage, isStreaming, isActive, sendMessage, setPendingReviewMessage])
 
   // Watch for pending conflict resolution message and send it
   const [pendingConflictMessage, setPendingConflictMessage] = useAtom(
@@ -2459,7 +2461,7 @@ const ChatViewInner = memo(function ChatViewInner({
   )
 
   useEffect(() => {
-    if (pendingConflictMessage && !isStreaming) {
+    if (pendingConflictMessage && !isStreaming && isActive) {
       // Clear the pending message immediately to prevent double-sending
       setPendingConflictMessage(null)
 
@@ -2469,7 +2471,7 @@ const ChatViewInner = memo(function ChatViewInner({
         parts: [{ type: "text", text: pendingConflictMessage }],
       })
     }
-  }, [pendingConflictMessage, isStreaming, sendMessage, setPendingConflictMessage])
+  }, [pendingConflictMessage, isStreaming, isActive, sendMessage, setPendingConflictMessage])
 
   // Handle pending "Build plan" from sidebar (atom - effect is defined after handleApprovePlan)
   const [pendingBuildPlanSubChatId, setPendingBuildPlanSubChatId] = useAtom(
