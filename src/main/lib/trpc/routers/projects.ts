@@ -546,4 +546,111 @@ export const projectsRouter = router({
         .returning()
         .get()
     }),
+
+  /**
+   * Update dev server command for a project
+   */
+  updateDevServerCommand: publicProcedure
+    .input(z.object({ id: z.string(), command: z.string().nullable() }))
+    .mutation(({ input }) => {
+      const db = getDatabase()
+      return db
+        .update(projects)
+        .set({ devServerCommand: input.command, updatedAt: new Date() })
+        .where(eq(projects.id, input.id))
+        .returning()
+        .get()
+    }),
+
+  /**
+   * Suggest dev server command based on project files
+   */
+  suggestDevServerCommand: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => {
+      const db = getDatabase()
+      const project = db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, input.id))
+        .get()
+
+      if (!project) {
+        throw new Error("Project not found")
+      }
+
+      const projectPath = project.path
+
+      // Check for package.json
+      const packageJsonPath = join(projectPath, "package.json")
+      if (existsSync(packageJsonPath)) {
+        try {
+          const packageJson = JSON.parse(
+            await import("node:fs/promises").then((fs) =>
+              fs.readFile(packageJsonPath, "utf-8")
+            )
+          )
+
+          // Check for dev or start script
+          const scripts = packageJson.scripts || {}
+          let scriptName: string | null = null
+
+          if (scripts.dev) {
+            scriptName = "dev"
+          } else if (scripts.start) {
+            scriptName = "start"
+          }
+
+          if (scriptName) {
+            // Detect package manager
+            let packageManager = "npm"
+            if (existsSync(join(projectPath, "bun.lockb"))) {
+              packageManager = "bun"
+            } else if (existsSync(join(projectPath, "pnpm-lock.yaml"))) {
+              packageManager = "pnpm"
+            } else if (existsSync(join(projectPath, "yarn.lock"))) {
+              packageManager = "yarn"
+            } else if (existsSync(join(projectPath, "package-lock.json"))) {
+              packageManager = "npm"
+            }
+
+            return { command: `${packageManager} run ${scriptName}` }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      // Check for Makefile with dev target
+      const makefilePath = join(projectPath, "Makefile")
+      if (existsSync(makefilePath)) {
+        try {
+          const makefile = await import("node:fs/promises").then((fs) =>
+            fs.readFile(makefilePath, "utf-8")
+          )
+          if (makefile.includes("dev:")) {
+            return { command: "make dev" }
+          }
+        } catch {
+          // Ignore read errors
+        }
+      }
+
+      // Check for common Python patterns
+      if (existsSync(join(projectPath, "manage.py"))) {
+        return { command: "python manage.py runserver" }
+      }
+
+      // Check for Cargo.toml (Rust)
+      if (existsSync(join(projectPath, "Cargo.toml"))) {
+        return { command: "cargo run" }
+      }
+
+      // Check for go.mod (Go)
+      if (existsSync(join(projectPath, "go.mod"))) {
+        return { command: "go run ." }
+      }
+
+      return { command: null }
+    }),
 })

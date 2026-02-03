@@ -121,7 +121,36 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     },
   })
 
+  // Dev server command mutations
+  const updateDevServerMutation = trpc.projects.updateDevServerCommand.useMutation({
+    onSuccess: () => {
+      refetchProject()
+    },
+    onError: (err) => {
+      toast.error(`Failed to save dev server command: ${err.message}`)
+    },
+  })
+
+  const suggestDevServerMutation = trpc.projects.suggestDevServerCommand.useMutation({
+    onSuccess: (data) => {
+      if (data.command) {
+        setDevServerCommand(data.command)
+        updateDevServerMutation.mutate({ id: projectId, command: data.command })
+        toast.success("Dev server command detected")
+      } else {
+        toast.info("Could not detect dev server command")
+      }
+    },
+    onError: (err) => {
+      toast.error(`Failed to detect command: ${err.message}`)
+    },
+  })
+
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+
+  // Dev server command state
+  const [devServerCommand, setDevServerCommand] = useState("")
+  const savedDevServerRef = useRef("")
 
   // Project name editing
   const [projectName, setProjectName] = useState("")
@@ -134,6 +163,14 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     }
   }, [project?.name])
 
+  // Sync dev server command from project
+  useEffect(() => {
+    if (project?.devServerCommand !== undefined) {
+      setDevServerCommand(project.devServerCommand || "")
+      savedDevServerRef.current = project.devServerCommand || ""
+    }
+  }, [project?.devServerCommand])
+
   const handleNameBlur = useCallback(async () => {
     const trimmed = projectName.trim()
     if (!trimmed || trimmed === savedNameRef.current) {
@@ -143,6 +180,19 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     renameMutation.mutate({ id: projectId, name: trimmed })
     savedNameRef.current = trimmed
   }, [projectName, projectId, renameMutation])
+
+  const handleDevServerBlur = useCallback(() => {
+    const trimmed = devServerCommand.trim()
+    if (trimmed === savedDevServerRef.current) {
+      return
+    }
+    updateDevServerMutation.mutate({ id: projectId, command: trimmed || null })
+    savedDevServerRef.current = trimmed
+  }, [devServerCommand, projectId, updateDevServerMutation])
+
+  const handleSuggestDevServer = useCallback(() => {
+    suggestDevServerMutation.mutate({ id: projectId })
+  }, [projectId, suggestDevServerMutation])
 
   // Local state
   const [saveTarget, setSaveTarget] = useState<"cursor" | "1code">("1code")
@@ -438,6 +488,40 @@ function ProjectDetail({ projectId }: { projectId: string }) {
                   )}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Dev Server ── */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-medium text-foreground">Dev Server</h4>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={handleSuggestDevServer}
+              disabled={suggestDevServerMutation.isPending}
+            >
+              <AIPenIcon className="h-3.5 w-3.5" />
+              {suggestDevServerMutation.isPending ? "Detecting..." : "Fill with AI"}
+            </Button>
+          </div>
+          <div className="bg-background rounded-lg border border-border overflow-hidden">
+            <div className="p-4 space-y-3">
+              <div>
+                <span className="text-sm font-medium text-foreground">Command</span>
+                <p className="text-sm text-muted-foreground">
+                  Command to start your development server
+                </p>
+              </div>
+              <Input
+                value={devServerCommand}
+                onChange={(e) => setDevServerCommand(e.target.value)}
+                onBlur={handleDevServerBlur}
+                placeholder="bun run dev"
+                className="font-mono text-sm"
+              />
             </div>
           </div>
         </div>

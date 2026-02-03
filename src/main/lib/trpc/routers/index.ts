@@ -7,6 +7,7 @@ import { claudeSettingsRouter } from "./claude-settings"
 import { anthropicAccountsRouter } from "./anthropic-accounts"
 import { ollamaRouter } from "./ollama"
 import { terminalRouter } from "./terminal"
+import { devServerRouter } from "./dev-server"
 import { externalRouter } from "./external"
 import { filesRouter } from "./files"
 import { debugRouter } from "./debug"
@@ -35,6 +36,7 @@ export function createAppRouter(getWindow: () => BrowserWindow | null) {
     anthropicAccounts: anthropicAccountsRouter,
     ollama: ollamaRouter,
     terminal: terminalRouter,
+    devServer: devServerRouter,
     external: externalRouter,
     files: filesRouter,
     debug: debugRouter,
