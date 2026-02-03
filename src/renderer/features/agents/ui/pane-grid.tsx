@@ -5,6 +5,8 @@ import { memo, useCallback, useEffect, useMemo } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { cn } from "../../../lib/utils"
 import { trpc } from "../../../lib/trpc"
+import { Button } from "../../../components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip"
 import {
   focusedPaneIdAtom,
   maximizedPaneIdAtom,
@@ -13,6 +15,7 @@ import {
   toggleMaximizePaneAtom,
 } from "../atoms/pane-atoms"
 import { selectedProjectAtom, subChatModeAtomFamily, getNextMode } from "../atoms"
+import { diffSidebarOpenAtomFamily } from "../atoms"
 import {
   getPaneByIndex,
   getAdjacentPane,
@@ -24,6 +27,17 @@ import { PaneChatView } from "../main/pane-chat-view"
 import { UsageIndicator } from "../../usage"
 import { usePanePlanApprovalWatcher } from "../hooks/use-pane-plan-approval-watcher"
 import type { PaneConfig } from "../types/pane-layout"
+import { FileDiff } from "lucide-react"
+import { PaneDiffSidebar } from "./pane-diff-sidebar"
+import { TerminalSidebar, TerminalBottomPanelContent } from "../../terminal/terminal-sidebar"
+import { ResizableBottomPanel } from "@/components/ui/resizable-bottom-panel"
+import { CustomTerminalIcon } from "@/components/ui/icons"
+import {
+  terminalSidebarOpenAtomFamily,
+  terminalDisplayModeAtom,
+  terminalBottomHeightAtom,
+} from "../../terminal/atoms"
+import { DevServerControls, DevServerPanel } from "../../dev-server"
 
 interface PaneGridProps {
   projectId: string
@@ -40,6 +54,15 @@ export const PaneGrid = memo(function PaneGrid({
   const toggleMaximize = useSetAtom(toggleMaximizePaneAtom)
   const updatePaneSubChat = useSetAtom(updatePaneSubChatAtomFamily(projectId))
   const selectedProject = useAtomValue(selectedProjectAtom)
+  const diffKey = useMemo(() => `project:${projectId}`, [projectId])
+  const diffSidebarAtom = useMemo(() => diffSidebarOpenAtomFamily(diffKey), [diffKey])
+  const [isDiffSidebarOpen, setIsDiffSidebarOpen] = useAtom(diffSidebarAtom)
+
+  // Terminal state - scoped to project like diff sidebar
+  const terminalKey = useMemo(() => `project:${projectId}`, [projectId])
+  const terminalSidebarAtom = useMemo(() => terminalSidebarOpenAtomFamily(terminalKey), [terminalKey])
+  const [isTerminalOpen, setIsTerminalOpen] = useAtom(terminalSidebarAtom)
+  const terminalDisplayMode = useAtomValue(terminalDisplayModeAtom)
 
   // Query sub-chats for this project
   const { data: subChatsData } = trpc.chats.listSubChatsByProject.useQuery(
@@ -80,7 +103,7 @@ export const PaneGrid = memo(function PaneGrid({
       try {
         const newSubChat = await createSubChatMutation.mutateAsync({
           projectId: selectedProject.id,
-          mode: "agent",
+          mode: "plan",
         })
 
         // Update pane with new sub-chat
@@ -150,6 +173,37 @@ export const PaneGrid = memo(function PaneGrid({
     { enableOnFormTags: true },
     [focusedPaneId, toggleMaximize]
   )
+
+  // Toggle diff (Cmd+D)
+  useHotkeys(
+    "meta+d",
+    (e) => {
+      e.preventDefault()
+      setIsDiffSidebarOpen(!isDiffSidebarOpen)
+    },
+    { enableOnFormTags: true },
+    [isDiffSidebarOpen, setIsDiffSidebarOpen]
+  )
+
+  // Toggle terminal (Cmd+J)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.metaKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        e.code === "KeyJ"
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsTerminalOpen(!isTerminalOpen)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [isTerminalOpen, setIsTerminalOpen])
 
   // New chat in focused pane (Cmd+N)
   useHotkeys(
@@ -255,6 +309,7 @@ export const PaneGrid = memo(function PaneGrid({
                 projectId={projectId}
                 projectPath={selectedProject.path}
                 isFocused={true}
+                onClearAndNew={() => handleCreateNew(maximizedPane.id)}
               />
             )}
           </Pane>
@@ -264,57 +319,148 @@ export const PaneGrid = memo(function PaneGrid({
   }
 
   return (
-    <div className={cn("h-full flex flex-col", className)}>
-      {/* Header with layout selector */}
-      <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">
-            {selectedProject?.name ?? "Project"}
-          </span>
+    <div className="h-full flex flex-col">
+      {/* Main content wrapper */}
+      <div className={cn("flex-1 min-h-0 flex flex-col overflow-hidden", className)}>
+        {/* Header with layout selector */}
+        <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">
+              {selectedProject?.name ?? "Project"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Dev Server Controls */}
+            {selectedProject && (
+              <DevServerControls
+                projectId={projectId}
+                projectPath={selectedProject.path}
+              />
+            )}
+            <UsageIndicator />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setIsTerminalOpen(!isTerminalOpen)}
+                >
+                  <CustomTerminalIcon className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Terminal <span className="ml-2">⌘J</span>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setIsDiffSidebarOpen(!isDiffSidebarOpen)}
+                >
+                  <FileDiff className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Open diff <span className="ml-2">⌘D</span>
+              </TooltipContent>
+            </Tooltip>
+            <PaneLayoutSelector projectId={projectId} />
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <UsageIndicator />
-          <PaneLayoutSelector projectId={projectId} />
-        </div>
-      </div>
 
-      {/* Grid of panes */}
-      <div
-        className="flex-1 min-h-0 grid gap-2 p-2 overflow-hidden"
-        style={{
-          gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
-          gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-        }}
-      >
-        {sortedPanes.map((pane, index) => {
-          const subChat = pane.subChatId
-            ? subChatsMap.get(pane.subChatId)
-            : null
+        {/* Horizontal flex container for grid + sidebars */}
+        <div className="flex-1 min-h-0 flex overflow-hidden">
+          {/* Grid of panes */}
+          <div
+            className="flex-1 min-h-0 grid gap-2 p-2 overflow-hidden"
+            style={{
+              gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`,
+            }}
+          >
+            {sortedPanes.map((pane, index) => {
+              const subChat = pane.subChatId
+                ? subChatsMap.get(pane.subChatId)
+                : null
 
-          return (
-            <Pane
-              key={pane.id}
-              pane={pane}
-              projectId={projectId}
-              paneIndex={index}
-              subChatName={subChat?.name}
-              subChatMode={subChat?.mode as "plan" | "agent" | undefined}
-              onCreateNew={() => handleCreateNew(pane.id)}
-              onClose={() => handleClosePane(pane.id)}
-            >
-              {pane.subChatId && selectedProject && (
-                <PaneChatView
-                  paneId={pane.id}
-                  subChatId={pane.subChatId}
+              return (
+                <Pane
+                  key={pane.id}
+                  pane={pane}
                   projectId={projectId}
-                  projectPath={selectedProject.path}
-                  isFocused={focusedPaneId === pane.id}
-                />
-              )}
-            </Pane>
-          )
-        })}
+                  paneIndex={index}
+                  subChatName={subChat?.name}
+                  subChatMode={subChat?.mode as "plan" | "agent" | undefined}
+                  onCreateNew={() => handleCreateNew(pane.id)}
+                  onClose={() => handleClosePane(pane.id)}
+                >
+                  {pane.subChatId && selectedProject && (
+                    <PaneChatView
+                      paneId={pane.id}
+                      subChatId={pane.subChatId}
+                      projectId={projectId}
+                      projectPath={selectedProject.path}
+                      isFocused={focusedPaneId === pane.id}
+                      onClearAndNew={() => handleCreateNew(pane.id)}
+                    />
+                  )}
+                </Pane>
+              )
+            })}
+          </div>
+
+          {/* Diff Sidebar */}
+          {selectedProject && (
+            <PaneDiffSidebar
+              projectId={projectId}
+              projectPath={selectedProject.path}
+              focusedSubChatId={focusedSubChatId}
+            />
+          )}
+
+          {/* Terminal Sidebar (side-peek mode) */}
+          {selectedProject && (
+            <TerminalSidebar
+              chatId={terminalKey}
+              cwd={selectedProject.path}
+              workspaceId={projectId}
+            />
+          )}
+        </div>
       </div>
+
+      {/* Terminal Bottom Panel (bottom mode) */}
+      {terminalDisplayMode === "bottom" && selectedProject && (
+        <ResizableBottomPanel
+          isOpen={isTerminalOpen}
+          onClose={() => setIsTerminalOpen(false)}
+          heightAtom={terminalBottomHeightAtom}
+          minHeight={150}
+          maxHeight={500}
+          showResizeTooltip={true}
+          className="bg-background border-t"
+          style={{ borderTopWidth: "0.5px" }}
+        >
+          <TerminalBottomPanelContent
+            chatId={terminalKey}
+            cwd={selectedProject.path}
+            workspaceId={projectId}
+            onClose={() => setIsTerminalOpen(false)}
+          />
+        </ResizableBottomPanel>
+      )}
+
+      {/* Dev Server Bottom Panel */}
+      {selectedProject && (
+        <DevServerPanel
+          projectId={projectId}
+          projectPath={selectedProject.path}
+        />
+      )}
     </div>
   )
 })

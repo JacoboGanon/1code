@@ -65,6 +65,7 @@ import { SubChatsQuickSwitchDialog } from "../components/subchats-quick-switch-d
 import { isDesktopApp } from "../../../lib/utils/platform"
 import { SettingsContent } from "../../settings/settings-content"
 import { PaneGrid } from "./pane-grid"
+import { PaneGridConnectionGate } from "./pane-grid-connection-gate"
 // Desktop mock
 const useIsAdmin = () => false
 
@@ -965,10 +966,12 @@ export function AgentsContent() {
             <InboxView />
           ) : !classicChatViewEnabled && selectedProject ? (
             // Multi-pane layout mode (default): show PaneGrid for selected project
-            <PaneGrid
-              key={`pane-grid-${selectedProject.id}`}
-              projectId={selectedProject.id}
-            />
+            <PaneGridConnectionGate projectId={selectedProject.id}>
+              <PaneGrid
+                key={`pane-grid-${selectedProject.id}`}
+                projectId={selectedProject.id}
+              />
+            </PaneGridConnectionGate>
           ) : selectedChatId ? (
             <div className="h-full flex flex-col relative overflow-hidden">
               <ChatView
