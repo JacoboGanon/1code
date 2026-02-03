@@ -28,10 +28,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# First-time setup
+bun install
+bun run claude:download  # Download Claude CLI binary (required for agent chat!)
+
 # Development
 bun run dev              # Start Electron with hot reload
+bun run ts:check         # TypeScript type checking
 
-# Build
+# Build & Package
 bun run build            # Compile app
 bun run package          # Package for current platform (dir)
 bun run package:mac      # Build macOS (DMG + ZIP)
@@ -41,6 +46,7 @@ bun run package:linux    # Build Linux (AppImage + DEB)
 # Database (Drizzle + SQLite)
 bun run db:generate      # Generate migrations from schema
 bun run db:push          # Push schema directly (dev only)
+bun run db:studio        # Open Drizzle Studio GUI
 ```
 
 ## Architecture
@@ -57,7 +63,10 @@ src/
 │       │   ├── index.ts     # DB init, auto-migrate on startup
 │       │   ├── schema/      # Drizzle table definitions
 │       │   └── utils.ts     # ID generation
-│       └── trpc/routers/    # tRPC routers (projects, chats, claude)
+│       ├── trpc/routers/    # tRPC routers (20+ routers)
+│       ├── claude.ts        # Claude SDK wrapper utilities
+│       ├── claude-config.ts # MCP server config management
+│       └── git/             # Git operations (worktree, stash, watcher)
 │
 ├── preload/                 # IPC bridge (context isolation)
 │   └── index.ts             # Exposes desktopApi + tRPC bridge
@@ -71,15 +80,17 @@ src/
     │   │   ├── commands/    # Slash commands (/plan, /agent, /clear)
     │   │   ├── atoms/       # Jotai atoms for agent state
     │   │   └── stores/      # Zustand store for sub-chats
+    │   ├── changes/         # Git changes panel, diff views
+    │   ├── terminal/        # Integrated terminal (xterm.js)
+    │   ├── file-viewer/     # File browser and search
+    │   ├── mentions/        # @ mentions (files, agents, skills, MCP tools)
     │   ├── sidebar/         # Chat list, archive, navigation
-    │   ├── sub-chats/       # Tab/sidebar sub-chat management
     │   └── layout/          # Main layout with resizable panels
     ├── components/ui/       # Radix UI wrappers (button, dialog, etc.)
     └── lib/
         ├── atoms/           # Global Jotai atoms
         ├── stores/          # Global Zustand stores
-        ├── trpc.ts          # Real tRPC client
-        └── mock-api.ts      # DEPRECATED - being replaced with real tRPC
+        └── trpc.ts          # tRPC client
 ```
 
 ## Database (Drizzle ORM)
@@ -89,10 +100,12 @@ src/
 **Schema:** `src/main/lib/db/schema/index.ts`
 
 ```typescript
-// Three main tables:
-projects    → id, name, path (local folder), timestamps
-chats       → id, name, projectId, worktree fields, timestamps
-sub_chats   → id, name, chatId, sessionId, mode, messages (JSON)
+// Main tables:
+projects            → id, name, path (local folder), git remote info, timestamps
+chats               → id, name, projectId, worktree/branch fields, PR tracking, timestamps
+sub_chats           → id, name, chatId, sessionId, mode, messages (JSON)
+anthropic_accounts  → id, email, oauthToken (encrypted), multi-account support
+anthropic_settings  → activeAccountId (singleton row for current account)
 ```
 
 **Auto-migration:** On app start, `initDatabase()` runs migrations from `drizzle/` folder (dev) or `resources/migrations` (packaged).
@@ -120,21 +133,23 @@ const projectChats = db.select().from(chats).where(eq(chats.projectId, id)).all(
 - **React Query**: Server state via tRPC (auto-caching, refetch)
 
 ### Claude Integration
-- Dynamic import of `@anthropic-ai/claude-code` SDK
+- Uses `@anthropic-ai/claude-agent-sdk` (dynamically imported)
 - Two modes: "plan" (read-only) and "agent" (full permissions)
 - Session resume via `sessionId` stored in SubChat
 - Message streaming via tRPC subscription (`claude.onMessage`)
+- @ mentions: `@[file:local:path]`, `@[agent:name]`, `@[skill:name]`, `@[tool:mcp-server]`
+- MCP server support: Global (`~/.claude.json`) and per-project (`.mcp.json`)
 
 ## Tech Stack
 
 | Layer | Tech |
 |-------|------|
-| Desktop | Electron 33.4.5, electron-vite, electron-builder |
+| Desktop | Electron ~39.4, electron-vite, electron-builder |
 | UI | React 19, TypeScript 5.4.5, Tailwind CSS |
 | Components | Radix UI, Lucide icons, Motion, Sonner |
 | State | Jotai, Zustand, React Query |
 | Backend | tRPC, Drizzle ORM, better-sqlite3 |
-| AI | @anthropic-ai/claude-code |
+| AI | @anthropic-ai/claude-agent-sdk |
 | Package Manager | bun |
 
 ## File Naming
@@ -169,7 +184,6 @@ defaults delete dev.21st.agents.dev  # Dev mode
 defaults delete dev.21st.agents      # Production
 
 # 4. Run in dev mode with clean state
-cd apps/desktop
 bun run dev
 ```
 
@@ -235,18 +249,24 @@ npm version patch --no-git-tag-version  # 0.0.27 → 0.0.28
 3. User clicks Download → downloads ZIP in background
 4. User clicks "Restart Now" → installs update and restarts
 
-## Current Status (WIP)
+## Key tRPC Routers
 
-**Done:**
-- Drizzle ORM setup with schema (projects, chats, sub_chats)
-- Auto-migration on app startup
-- tRPC routers structure
+The main process exposes these routers via tRPC (`src/main/lib/trpc/routers/`):
 
-**In Progress:**
-- Replacing `mock-api.ts` with real tRPC calls in renderer
-- ProjectSelector component (local folder picker)
-
-**Planned:**
-- Git worktree per chat (isolation)
-- Claude Code execution in worktree path
-- Full feature parity with web app
+| Router | Purpose |
+|--------|---------|
+| `claude` | Claude SDK integration, message streaming, session management |
+| `claudeCode` | Claude Code binary management and OAuth |
+| `claudeSettings` | Model and provider settings |
+| `anthropicAccounts` | Multi-account OAuth management |
+| `projects` | Project CRUD, folder linking |
+| `chats` | Chat/sub-chat management, worktree operations |
+| `terminal` | Integrated terminal (node-pty) |
+| `files` | File operations, git status |
+| `skills` | Slash command skills |
+| `agents` | Custom agent/subagent management |
+| `plugins` | Plugin/MCP server management |
+| `voice` | Voice dictation |
+| `changes` | Git operations (staging, commits, branches) |
+| `worktreeConfig` | Git worktree configuration |
+| `ollama` | Local Ollama model integration |
