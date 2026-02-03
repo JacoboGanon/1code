@@ -226,9 +226,9 @@ npm version patch --no-git-tag-version  # 0.0.27 → 0.0.28
 
 1. Wait for notarization (2-5 min): `xcrun notarytool history --keychain-profile "21st-notarize"`
 2. Staple DMGs: `cd release && xcrun stapler staple *.dmg`
-3. Re-upload stapled DMGs to R2 and GitHub (see RELEASE.md for commands)
+3. Re-upload stapled DMGs to R2 and GitHub
 4. Update changelog: `gh release edit v0.0.X --notes "..."`
-5. **Upload manifests (triggers auto-updates!)** — see RELEASE.md
+5. **Upload manifests (triggers auto-updates!)**
 6. Sync to public: `./scripts/sync-to-public.sh`
 
 ### Files Uploaded to CDN
@@ -270,3 +270,7 @@ The main process exposes these routers via tRPC (`src/main/lib/trpc/routers/`):
 | `changes` | Git operations (staging, commits, branches) |
 | `worktreeConfig` | Git worktree configuration |
 | `ollama` | Local Ollama model integration |
+| `usage` | Usage tracking and statistics |
+| `commands` | Command execution |
+| `debug` | Debug utilities |
+| `external` | External integrations |
