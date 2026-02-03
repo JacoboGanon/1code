@@ -22,6 +22,8 @@ export const projects = sqliteTable("projects", {
   gitRepo: text("git_repo"),
   // Custom project icon (absolute path to local image file)
   iconPath: text("icon_path"),
+  // Dev server command (e.g., "bun run dev", "npm run dev")
+  devServerCommand: text("dev_server_command"),
 })
 
 export const projectsRelations = relations(projects, ({ many }) => ({
@@ -119,6 +121,8 @@ export const anthropicAccounts = sqliteTable("anthropic_accounts", {
   email: text("email"), // User's email from OAuth (if available)
   displayName: text("display_name"), // User-editable label
   oauthToken: text("oauth_token").notNull(), // Encrypted with safeStorage
+  refreshToken: text("refresh_token"), // Encrypted with safeStorage (for token refresh)
+  expiresAt: integer("expires_at"), // Unix timestamp (ms) when access token expires
   connectedAt: integer("connected_at", { mode: "timestamp" }).$defaultFn(
     () => new Date(),
   ),

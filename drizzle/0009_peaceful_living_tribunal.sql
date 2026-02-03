@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `dev_server_command` text;
