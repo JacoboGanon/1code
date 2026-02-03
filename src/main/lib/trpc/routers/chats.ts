@@ -3,6 +3,7 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import simpleGit from "simple-git"
 import { z } from "zod"
+import { getApiUrl } from "../../config"
 import { getAuthManager } from "../../../index"
 import {
   trackPRCreated,
@@ -611,21 +612,35 @@ export const chatsRouter = router({
 
       if (!subChat) return null
 
-      const chat = db
-        .select()
-        .from(chats)
-        .where(eq(chats.id, subChat.chatId))
-        .get()
+      // Handle both chatId-based and projectId-based sub-chats
+      let chat = null
+      let project = null
 
-      const project = chat
-        ? db
-            .select()
-            .from(projects)
-            .where(eq(projects.id, chat.projectId))
-            .get()
-        : null
+      if (subChat.chatId) {
+        // Legacy: sub-chat belongs to a chat (workspace)
+        chat = db
+          .select()
+          .from(chats)
+          .where(eq(chats.id, subChat.chatId))
+          .get()
 
-      return { ...subChat, chat: chat ? { ...chat, project } : null }
+        project = chat
+          ? db
+              .select()
+              .from(projects)
+              .where(eq(projects.id, chat.projectId))
+              .get()
+          : null
+      } else if (subChat.projectId) {
+        // New: sub-chat belongs directly to a project (pane mode)
+        project = db
+          .select()
+          .from(projects)
+          .where(eq(projects.id, subChat.projectId))
+          .get()
+      }
+
+      return { ...subChat, chat: chat ? { ...chat, project } : null, project }
     }),
 
   /**
@@ -706,16 +721,28 @@ export const chatsRouter = router({
         return { success: false, error: "Message not found" }
       }
 
-      // 3. Get the parent chat for worktreePath
-      const chat = db
-        .select()
-        .from(chats)
-        .where(eq(chats.id, subChat.chatId))
-        .get()
+      // 3. Get the parent chat for worktreePath (only if chatId exists)
+      const chat = subChat.chatId
+        ? db
+            .select()
+            .from(chats)
+            .where(eq(chats.id, subChat.chatId))
+            .get()
+        : null
+
+      // For pane-based sub-chats, get project path directly
+      const projectPath = subChat.projectId
+        ? db
+            .select()
+            .from(projects)
+            .where(eq(projects.id, subChat.projectId))
+            .get()?.path
+        : null
 
       // 4. Rollback git state first - if this fails, abort the whole operation
-      if (chat?.worktreePath) {
-        const res = await applyRollbackStash(chat.worktreePath, input.sdkMessageUuid)
+      const worktreePath = chat?.worktreePath || projectPath
+      if (worktreePath) {
+        const res = await applyRollbackStash(worktreePath, input.sdkMessageUuid)
         if (!res.success) {
           return { success: false, error: `Git rollback failed: ${res.error}` }
         }
@@ -814,6 +841,141 @@ export const chatsRouter = router({
         .where(eq(subChats.id, input.id))
         .returning()
         .get()
+    }),
+
+  // ============ Project-based sub-chat procedures (for multi-pane layout) ============
+
+  /**
+   * List sub-chats directly under a project (pane-based layout)
+   * Returns sub-chats that have projectId set (not legacy chatId-based ones)
+   */
+  listSubChatsByProject: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(({ input }) => {
+      const db = getDatabase()
+      return db
+        .select()
+        .from(subChats)
+        .where(eq(subChats.projectId, input.projectId))
+        .orderBy(desc(subChats.updatedAt))
+        .all()
+    }),
+
+  /**
+   * Create a sub-chat directly under a project (for multi-pane layout)
+   * These sub-chats have no parent chat - they belong directly to the project
+   */
+  createSubChatForProject: publicProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        name: z.string().optional(),
+        mode: z.enum(["plan", "agent"]).default("agent"),
+        initialMessage: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDatabase()
+
+      // Verify project exists
+      const project = db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, input.projectId))
+        .get()
+      if (!project) throw new Error("Project not found")
+
+      // Build initial messages if provided
+      let initialMessages = "[]"
+      if (input.initialMessage) {
+        initialMessages = JSON.stringify([
+          {
+            id: `msg-${Date.now()}`,
+            role: "user",
+            parts: [{ type: "text", text: input.initialMessage }],
+          },
+        ])
+      }
+
+      return db
+        .insert(subChats)
+        .values({
+          projectId: input.projectId,
+          // chatId is null for project-based sub-chats
+          name: input.name,
+          mode: input.mode,
+          messages: initialMessages,
+        })
+        .returning()
+        .get()
+    }),
+
+  /**
+   * Get a sub-chat with its project info (for pane-based layout)
+   */
+  getSubChatWithProject: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ input }) => {
+      const db = getDatabase()
+      const subChat = db
+        .select()
+        .from(subChats)
+        .where(eq(subChats.id, input.id))
+        .get()
+
+      if (!subChat) return null
+
+      // Get project directly if projectId is set, otherwise through chat
+      let project = null
+      if (subChat.projectId) {
+        project = db
+          .select()
+          .from(projects)
+          .where(eq(projects.id, subChat.projectId))
+          .get()
+      } else if (subChat.chatId) {
+        const chat = db
+          .select()
+          .from(chats)
+          .where(eq(chats.id, subChat.chatId))
+          .get()
+        if (chat) {
+          project = db
+            .select()
+            .from(projects)
+            .where(eq(projects.id, chat.projectId))
+            .get()
+        }
+      }
+
+      return { ...subChat, project }
+    }),
+
+  /**
+   * Get git diff for a project's main path (for pane-based sub-chats)
+   * Unlike getDiff which uses worktreePath, this uses the project's path directly
+   */
+  getProjectDiff: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ input }) => {
+      const db = getDatabase()
+      const project = db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, input.projectId))
+        .get()
+
+      if (!project?.path) {
+        return { diff: null, error: "Project not found" }
+      }
+
+      const result = await getWorktreeDiff(project.path)
+
+      if (!result.success) {
+        return { diff: null, error: result.error }
+      }
+
+      return { diff: result.diff || "" }
     }),
 
   /**
@@ -1045,8 +1207,7 @@ export const chatsRouter = router({
         try {
           const authManager = getAuthManager()
           const token = await authManager.getValidToken()
-          // Use localhost in dev, production otherwise
-          const apiUrl = process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://21st.dev"
+          const apiUrl = getApiUrl()
 
           if (!token) {
             apiError = "No auth token available"
@@ -1171,7 +1332,7 @@ export const chatsRouter = router({
         // Online - use web API
         const authManager = getAuthManager()
         const token = await authManager.getValidToken()
-        const apiUrl = "https://21st.dev"
+        const apiUrl = getApiUrl()
 
         console.log(
           "[generateSubChatName] Online - calling API with token:",
@@ -1537,6 +1698,7 @@ export const chatsRouter = router({
    * Uses mode field as source of truth: mode="plan" + completed ExitPlanMode = pending approval
    * Logic must match active-chat.tsx hasUnapprovedPlan
    * REQUIRES openSubChatIds to avoid loading all sub-chats (performance optimization)
+   * Supports both workspace-based (chatId) and pane-based (projectId) sub-chats
    */
   getPendingPlanApprovals: publicProcedure
     .input(z.object({ openSubChatIds: z.array(z.string()) }))
@@ -1552,6 +1714,7 @@ export const chatsRouter = router({
     const allSubChats = db
       .select({
         chatId: subChats.chatId,
+        projectId: subChats.projectId,
         subChatId: subChats.id,
         mode: subChats.mode,
         messages: subChats.messages,
@@ -1563,7 +1726,10 @@ export const chatsRouter = router({
     const pendingApprovals: Array<{ subChatId: string; chatId: string }> = []
 
     for (const row of allSubChats) {
-      if (!row.subChatId || !row.chatId) continue
+      // Support both workspace-based (chatId) and pane-based (projectId) sub-chats
+      // For pane-based sub-chats, use projectId as the "chatId" for grouping
+      const parentId = row.chatId || row.projectId
+      if (!row.subChatId || !parentId) continue
 
       // If mode is "agent", plan is already approved - skip
       if (row.mode === "agent") continue
@@ -1605,7 +1771,7 @@ export const chatsRouter = router({
         if (hasCompletedExitPlanMode()) {
           pendingApprovals.push({
             subChatId: row.subChatId,
-            chatId: row.chatId,
+            chatId: parentId, // Can be either chatId or projectId
           })
         }
       } catch {

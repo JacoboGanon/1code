@@ -195,6 +195,7 @@ export type SettingsTab =
   | "debug"
   | "beta"
   | "keyboard"
+  | "usage"
 export const agentsSettingsDialogActiveTabAtom = atom<SettingsTab>("preferences")
 // Derived atom: maps settings open/close to desktopView navigation
 export const agentsSettingsDialogOpenAtom = atom(
@@ -444,6 +445,16 @@ export const betaAutomationsEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true },
 )
 
+// Classic Chat View (opt-in after pane view became default)
+// When enabled, uses single-workspace layout instead of multi-pane grid
+// When disabled (default), uses the new pane view
+export const classicChatViewEnabledAtom = atomWithStorage<boolean>(
+  "preferences:classic-chat-view-enabled",
+  false, // Default OFF = pane view is default
+  undefined,
+  { getOnInit: true },
+)
+
 // Beta: Enable Tasks functionality in Claude Code SDK
 // When enabled (default), the SDK exposes task-related tools (TodoWrite, Task agents)
 export const enableTasksAtom = atomWithStorage<boolean>(
@@ -500,6 +511,22 @@ if (typeof window !== "undefined") {
     localStorage.setItem(newKey, JSON.stringify(wasInPlanMode ? "plan" : "agent"))
     localStorage.removeItem(oldKey)
     console.log("[atoms] Migrated isPlanMode to defaultAgentMode:", wasInPlanMode ? "plan" : "agent")
+  }
+}
+
+// Migration: convert old beta-pane-mode-enabled to new classic-chat-view-enabled
+// This runs once when the module loads
+if (typeof window !== "undefined") {
+  const oldKey = "preferences:beta-pane-mode-enabled"
+  const newKey = "preferences:classic-chat-view-enabled"
+  const oldValue = localStorage.getItem(oldKey)
+  if (oldValue !== null && localStorage.getItem(newKey) === null) {
+    // Invert: if user HAD pane mode enabled (true), they want pane mode (classic=false)
+    // if user had pane mode disabled (false), they get classic mode (classic=true)
+    const hadPaneModeEnabled = oldValue === "true"
+    localStorage.setItem(newKey, JSON.stringify(!hadPaneModeEnabled))
+    localStorage.removeItem(oldKey)
+    console.log("[atoms] Migrated betaPaneModeEnabled to classicChatViewEnabled:", !hadPaneModeEnabled)
   }
 }
 

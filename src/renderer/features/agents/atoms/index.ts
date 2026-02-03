@@ -642,11 +642,11 @@ export const lastSelectedBranchesAtom = atomWithStorage<
 
 // Compacting status per sub-chat
 // Set<subChatId> - subChats currently being compacted
-export const compactingSubChatsAtom = atom<Set<string>>(new Set())
+export const compactingSubChatsAtom = atom<Set<string>>(new Set<string>())
 
 // Track IDs of chats/subchats created in this browser session (NOT persisted - resets on reload)
 // Used to determine whether to show placeholder + typewriter effect
-export const justCreatedIdsAtom = atom<Set<string>>(new Set())
+export const justCreatedIdsAtom = atom<Set<string>>(new Set<string>())
 
 // Pending user questions from AskUserQuestion tool
 // Set when Claude requests user input, cleared when answered or skipped

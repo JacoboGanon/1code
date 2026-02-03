@@ -21,6 +21,7 @@ import {
   agentsSubChatsSidebarModeAtom,
   agentsSubChatsSidebarWidthAtom,
   desktopViewAtom,
+  selectedProjectAtom,
 } from "../atoms"
 import {
   selectedTeamIdAtom,
@@ -31,6 +32,7 @@ import {
   ctrlTabTargetAtom,
   betaKanbanEnabledAtom,
   betaAutomationsEnabledAtom,
+  classicChatViewEnabledAtom,
   chatSourceModeAtom,
 } from "../../../lib/atoms"
 import { NewChatForm } from "../main/new-chat-form"
@@ -62,6 +64,7 @@ import { AgentsQuickSwitchDialog } from "../components/agents-quick-switch-dialo
 import { SubChatsQuickSwitchDialog } from "../components/subchats-quick-switch-dialog"
 import { isDesktopApp } from "../../../lib/utils/platform"
 import { SettingsContent } from "../../settings/settings-content"
+import { PaneGrid } from "./pane-grid"
 // Desktop mock
 const useIsAdmin = () => false
 
@@ -76,6 +79,8 @@ export function AgentsContent() {
   const showNewChatForm = useAtomValue(showNewChatFormAtom)
   const betaKanbanEnabled = useAtomValue(betaKanbanEnabledAtom)
   const betaAutomationsEnabled = useAtomValue(betaAutomationsEnabledAtom)
+  const classicChatViewEnabled = useAtomValue(classicChatViewEnabledAtom)
+  const selectedProject = useAtomValue(selectedProjectAtom)
   const [selectedTeamId] = useAtom(selectedTeamIdAtom)
   const [sidebarOpen, setSidebarOpen] = useAtom(agentsSidebarOpenAtom)
   const [previewSidebarOpen, setPreviewSidebarOpen] = useAtom(
@@ -958,6 +963,12 @@ export function AgentsContent() {
             <AutomationsDetailView />
           ) : betaAutomationsEnabled && desktopView === "inbox" ? (
             <InboxView />
+          ) : !classicChatViewEnabled && selectedProject ? (
+            // Multi-pane layout mode (default): show PaneGrid for selected project
+            <PaneGrid
+              key={`pane-grid-${selectedProject.id}`}
+              projectId={selectedProject.id}
+            />
           ) : selectedChatId ? (
             <div className="h-full flex flex-col relative overflow-hidden">
               <ChatView
