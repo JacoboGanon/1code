@@ -10,8 +10,11 @@ import {
   clearLoading,
   setLoading,
   subChatModeAtomFamily,
+  isCreatingPrAtom,
+  pendingPrMessageAtom,
+  pendingReviewMessageAtom,
+  pendingConflictResolutionMessageAtom,
 } from "../atoms"
-import { clearPaneAtomFamily } from "../atoms/pane-atoms"
 import { IPCChatTransport } from "../lib/ipc-chat-transport"
 import { useStreamingStatusStore } from "../stores/streaming-status-store"
 import { agentChatStore } from "../stores/agent-chat-store"
@@ -26,6 +29,7 @@ interface PaneChatViewProps {
   projectId: string
   projectPath: string
   isFocused: boolean
+  onClearAndNew?: () => void
 }
 
 /**
@@ -43,6 +47,7 @@ export const PaneChatView = memo(function PaneChatView({
   projectId,
   projectPath,
   isFocused,
+  onClearAndNew,
 }: PaneChatViewProps) {
   // Query sub-chat data first - we need this before rendering the inner component
   const { data: subChatData, isLoading: isLoadingSubChat } = trpc.chats.getSubChatWithProject.useQuery(
@@ -67,6 +72,7 @@ export const PaneChatView = memo(function PaneChatView({
       projectId={projectId}
       projectPath={projectPath}
       isFocused={isFocused}
+      onClearAndNew={onClearAndNew}
       subChatData={subChatData}
     />
   )
@@ -86,10 +92,11 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
   projectId,
   projectPath,
   isFocused,
+  onClearAndNew,
   subChatData,
 }: PaneChatViewInnerProps) {
   const [inputValue, setInputValue] = useState("")
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
 
   // Slash command state
@@ -97,6 +104,7 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
   const [slashPosition, setSlashPosition] = useState({ top: 0, left: 0 })
 
   const setLoadingSubChats = useSetAtom(loadingSubChatsAtom)
+  const setIsCreatingPr = useSetAtom(isCreatingPrAtom)
 
   // Per-subChat mode
   const subChatModeAtom = useMemo(
@@ -105,8 +113,13 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
   )
   const [subChatMode, setSubChatMode] = useAtom(subChatModeAtom)
 
-  // Clear pane action (for /clear command)
-  const clearPane = useSetAtom(clearPaneAtomFamily(projectId))
+  // Initialize mode from database value on mount
+  useEffect(() => {
+    const dbMode = (subChatData as { mode?: string })?.mode
+    if (dbMode === "plan" || dbMode === "agent") {
+      setSubChatMode(dbMode)
+    }
+  }, [subChatId, subChatData, setSubChatMode])
 
   // Get streaming status
   const isStreaming = useStreamingStatusStore((state) => state.isStreaming(subChatId))
@@ -164,12 +177,51 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
     chat,
   })
 
+  const [pendingPrMessage, setPendingPrMessage] = useAtom(pendingPrMessageAtom)
+  const [pendingReviewMessage, setPendingReviewMessage] = useAtom(pendingReviewMessageAtom)
+  const [pendingConflictMessage, setPendingConflictMessage] = useAtom(pendingConflictResolutionMessageAtom)
+
+  useEffect(() => {
+    if (pendingPrMessage && !isStreaming && isFocused) {
+      setPendingPrMessage(null)
+      sendMessage({
+        role: "user",
+        parts: [{ type: "text", text: pendingPrMessage }],
+      })
+      setIsCreatingPr(false)
+    }
+  }, [pendingPrMessage, isStreaming, isFocused, sendMessage, setPendingPrMessage, setIsCreatingPr])
+
+  useEffect(() => {
+    if (pendingReviewMessage && !isStreaming && isFocused) {
+      setPendingReviewMessage(null)
+      sendMessage({
+        role: "user",
+        parts: [{ type: "text", text: pendingReviewMessage }],
+      })
+    }
+  }, [pendingReviewMessage, isStreaming, isFocused, sendMessage, setPendingReviewMessage])
+
+  useEffect(() => {
+    if (pendingConflictMessage && !isStreaming && isFocused) {
+      setPendingConflictMessage(null)
+      sendMessage({
+        role: "user",
+        parts: [{ type: "text", text: pendingConflictMessage }],
+      })
+    }
+  }, [pendingConflictMessage, isStreaming, isFocused, sendMessage, setPendingConflictMessage])
+
   // Focus input when pane is focused
   useEffect(() => {
     if (isFocused && inputRef.current) {
-      inputRef.current.focus()
+      // Use requestAnimationFrame to ensure focus happens after DOM settles
+      const raf = requestAnimationFrame(() => {
+        inputRef.current?.focus()
+      })
+      return () => cancelAnimationFrame(raf)
     }
-  }, [isFocused])
+  }, [isFocused, subChatId])
 
   // Calculate slash command dropdown position
   const updateSlashPosition = useCallback(() => {
@@ -183,9 +235,15 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
   }, [])
 
   // Handle input change - detect slash commands
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value
     setInputValue(value)
+
+    // Auto-resize textarea
+    if (e.target) {
+      e.target.style.height = 'auto'
+      e.target.style.height = `${e.target.scrollHeight}px`
+    }
 
     // Show slash dropdown when input starts with "/" and has no space yet
     if (value.startsWith("/") && !value.includes(" ")) {
@@ -205,8 +263,10 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
     if (command.category === "builtin") {
       switch (command.name) {
         case "clear":
-          // Clear pane (creates opportunity for new sub-chat)
-          clearPane(paneId)
+          // Create new chat in same pane (close current + create new)
+          if (onClearAndNew) {
+            onClearAndNew()
+          }
           return
         case "plan":
           if (subChatMode !== "plan") {
@@ -234,7 +294,7 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
 
     // For other commands, insert into input
     setInputValue(`/${command.name} `)
-  }, [clearPane, paneId, subChatMode, setSubChatMode, isStreaming, sendMessage, setLoadingSubChats, subChatId, projectId])
+  }, [onClearAndNew, subChatMode, setSubChatMode, isStreaming, sendMessage, setLoadingSubChats, subChatId, projectId])
 
   // Close slash dropdown
   const handleCloseSlashDropdown = useCallback(() => {
@@ -261,11 +321,23 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
     }
 
     setInputValue("")
+    // Reset textarea height after submit
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto'
+    }
   }, [inputValue, isStreaming, sendMessage, setLoadingSubChats, subChatId, projectId])
+
+  // Handle keyboard events for textarea
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e as unknown as React.FormEvent)
+    }
+  }, [handleSubmit])
 
   return (
     <div className={cn(
-      "h-full flex flex-col",
+      "h-full flex flex-col min-h-0",
       !isFocused && "opacity-90"
     )}>
       {/* Messages Area */}
@@ -321,18 +393,21 @@ const PaneChatViewInner = memo(function PaneChatViewInner({
 
       {/* Input Area */}
       <form onSubmit={handleSubmit} className="shrink-0 border-t p-3">
-        <div ref={inputContainerRef} className="flex items-center gap-2 relative">
-          <input
+        <div ref={inputContainerRef} className="flex items-end gap-2 relative">
+          <textarea
             ref={inputRef}
-            type="text"
             value={inputValue}
             onChange={handleInputChange}
-            placeholder="Type a message... (/ for commands)"
+            onKeyDown={handleKeyDown}
+            placeholder="Message..."
             disabled={isStreaming}
+            rows={1}
             className={cn(
               "flex-1 bg-muted/50 border border-border rounded-lg px-4 py-2 text-sm",
               "focus:outline-none focus:ring-1 focus:ring-ring",
               "placeholder:text-muted-foreground",
+              "resize-none overflow-y-auto",
+              "min-h-[38px] max-h-[120px]",
               isStreaming && "opacity-50 cursor-not-allowed"
             )}
           />
