@@ -7,6 +7,8 @@ interface ChangesPanelProps {
 	worktreePath: string;
 	/** Currently selected file path for highlighting */
 	selectedFilePath?: string | null;
+	/** Optional diff state key to scope diff state separate from chatId */
+	diffStateKey?: string;
 	/** Callback when a file is selected */
 	onFileSelect?: (
 		file: ChangedFile,
@@ -27,6 +29,8 @@ interface ChangesPanelProps {
 	initialSubChatFilter?: string | null;
 	/** Chat ID for AI-generated commit messages */
 	chatId?: string;
+	/** Project ID for AI-generated commit messages */
+	projectId?: string;
 	/** Selected commit hash for History tab */
 	selectedCommitHash?: string | null;
 	/** Callback when commit is selected in History tab */
@@ -42,6 +46,7 @@ interface ChangesPanelProps {
 export function ChangesPanel({
 	worktreePath,
 	selectedFilePath,
+	diffStateKey,
 	onFileSelect,
 	onFileOpenPinned,
 	onCreatePr,
@@ -49,6 +54,7 @@ export function ChangesPanel({
 	subChats,
 	initialSubChatFilter,
 	chatId,
+	projectId,
 	selectedCommitHash,
 	onCommitSelect,
 	onCommitFileSelect,
@@ -68,6 +74,7 @@ export function ChangesPanel({
 			<ChangesView
 				worktreePath={worktreePath}
 				selectedFilePath={selectedFilePath}
+				diffStateKey={diffStateKey}
 				onFileSelect={onFileSelect}
 				onFileOpenPinned={onFileOpenPinned}
 				onCreatePr={onCreatePr}
@@ -75,6 +82,7 @@ export function ChangesPanel({
 				subChats={subChats}
 				initialSubChatFilter={initialSubChatFilter}
 				chatId={chatId}
+				projectId={projectId}
 				selectedCommitHash={selectedCommitHash}
 				onCommitSelect={onCommitSelect}
 				onCommitFileSelect={onCommitFileSelect}

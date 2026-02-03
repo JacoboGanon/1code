@@ -15,6 +15,7 @@ import { chats, getDatabase, projects, subChats } from "../../db"
 import {
   createWorktreeForChat,
   fetchGitHubPRStatus,
+  getDefaultBranch,
   getWorktreeDiff,
   removeWorktree,
   sanitizeProjectName,
@@ -979,6 +980,53 @@ export const chatsRouter = router({
     }),
 
   /**
+   * Get PR context for a project's main path (pane-based diff view)
+   */
+  getProjectPrContext: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ input }) => {
+      const db = getDatabase()
+      const project = db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, input.projectId))
+        .get()
+
+      if (!project?.path) {
+        return null
+      }
+
+      try {
+        const git = simpleGit(project.path)
+        const status = await git.status()
+
+        let hasUpstream = false
+        try {
+          const tracking = await git.raw([
+            "rev-parse",
+            "--abbrev-ref",
+            "@{upstream}",
+          ])
+          hasUpstream = !!tracking.trim()
+        } catch {
+          hasUpstream = false
+        }
+
+        const baseBranch = await getDefaultBranch(project.path)
+
+        return {
+          branch: status.current || "unknown",
+          baseBranch: baseBranch || "main",
+          uncommittedCount: status.files.length,
+          hasUpstream,
+        }
+      } catch (error) {
+        console.error("[getProjectPrContext] Error:", error)
+        return null
+      }
+    }),
+
+  /**
    * Get git diff for a chat's worktree
    */
   getDiff: publicProcedure
@@ -1301,6 +1349,165 @@ export const chatsRouter = router({
       }
 
       console.log("[generateCommitMessage] Generated fallback message:", message)
+      return { message }
+    }),
+
+  /**
+   * Generate a commit message using AI based on the diff for a project
+   */
+  generateCommitMessageForProject: publicProcedure
+    .input(z.object({
+      projectId: z.string(),
+      filePaths: z.array(z.string()).optional(),
+      ollamaModel: z.string().nullish(), // Optional model for offline mode
+    }))
+    .mutation(async ({ input }) => {
+      const db = getDatabase()
+      const project = db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, input.projectId))
+        .get()
+
+      if (!project?.path) {
+        throw new Error("No project path")
+      }
+
+      const result = await getWorktreeDiff(project.path)
+
+      if (!result.success || !result.diff) {
+        throw new Error("Failed to get diff")
+      }
+
+      let files = splitUnifiedDiffByFile(result.diff)
+
+      if (input.filePaths && input.filePaths.length > 0) {
+        const selectedPaths = new Set(input.filePaths)
+        files = files.filter((f) => {
+          const filePath = f.newPath !== "/dev/null" ? f.newPath : f.oldPath
+          return selectedPaths.has(filePath) ||
+            [...selectedPaths].some(sp => filePath.endsWith(sp) || sp.endsWith(filePath))
+        })
+        console.log(`[generateCommitMessageForProject] Filtered ${files.length} files from ${input.filePaths.length} selected paths`)
+      }
+
+      if (files.length === 0) {
+        throw new Error("No changes to commit")
+      }
+
+      const filteredDiff = files.map(f => f.diffText).join('\\n')
+      const additions = files.reduce((sum, f) => sum + f.additions, 0)
+      const deletions = files.reduce((sum, f) => sum + f.deletions, 0)
+
+      const hasInternet = await checkInternetConnection()
+
+      if (!hasInternet) {
+        console.log("[generateCommitMessageForProject] Offline - trying Ollama...")
+        const ollamaMessage = await generateCommitMessageWithOllama(
+          filteredDiff,
+          files.length,
+          additions,
+          deletions,
+          input.ollamaModel
+        )
+        if (ollamaMessage) {
+          console.log("[generateCommitMessageForProject] Generated via Ollama:", ollamaMessage)
+          return { message: ollamaMessage }
+        }
+        console.log("[generateCommitMessageForProject] Ollama failed, using heuristic fallback")
+      } else {
+        let apiError: string | null = null
+        try {
+          const authManager = getAuthManager()
+          const token = await authManager.getValidToken()
+          const apiUrl = getApiUrl()
+
+          if (!token) {
+            apiError = "No auth token available"
+          } else {
+            const response = await fetch(
+              `${apiUrl}/api/agents/generate-commit-message`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Desktop-Token": token,
+                },
+                body: JSON.stringify({
+                  diff: filteredDiff.slice(0, 10000),
+                  fileCount: files.length,
+                  additions,
+                  deletions,
+                }),
+              },
+            )
+
+            if (response.ok) {
+              const data = await response.json()
+              if (data.message) {
+                return { message: data.message }
+              }
+              apiError = "API returned ok but no message in response"
+            } else {
+              apiError = `API returned ${response.status}`
+            }
+          }
+        } catch (error) {
+          apiError = `API call failed: ${error instanceof Error ? error.message : String(error)}`
+        }
+
+        if (apiError) {
+          console.log("[generateCommitMessageForProject] API error:", apiError)
+        }
+      }
+
+      const fileNames = files.map((f) => {
+        const filePath = f.newPath !== "/dev/null" ? f.newPath : f.oldPath
+        return path.posix.basename(filePath) || filePath
+      })
+
+      const hasNewFiles = files.some((f) => f.oldPath === "/dev/null")
+      const hasDeletedFiles = files.some((f) => f.newPath === "/dev/null")
+      const hasOnlyDeletions = files.every((f) => f.additions === 0 && f.deletions > 0)
+
+      const allPaths = files.map((f) => f.newPath !== "/dev/null" ? f.newPath : f.oldPath)
+      const hasTestFiles = allPaths.some((p) => p.includes("test") || p.includes("spec"))
+      const hasDocFiles = allPaths.some((p) => p.endsWith(".md") || p.includes("doc"))
+      const hasConfigFiles = allPaths.some((p) =>
+        p.includes("config") ||
+        p.endsWith(".json") ||
+        p.endsWith(".yaml") ||
+        p.endsWith(".yml") ||
+        p.endsWith(".toml")
+      )
+
+      let prefix = "chore"
+      if (hasNewFiles && !hasDeletedFiles) {
+        prefix = "feat"
+      } else if (hasOnlyDeletions) {
+        prefix = "chore"
+      } else if (hasTestFiles && !hasDocFiles && !hasConfigFiles) {
+        prefix = "test"
+      } else if (hasDocFiles && !hasTestFiles && !hasConfigFiles) {
+        prefix = "docs"
+      } else if (allPaths.some((p) => p.includes("fix") || p.includes("bug"))) {
+        prefix = "fix"
+      } else if (files.length > 0 && files.every((f) => f.additions > 0 || f.deletions > 0)) {
+        prefix = "fix"
+      }
+
+      const uniqueFileNames = [...new Set(fileNames)]
+      let message: string
+
+      if (uniqueFileNames.length === 1) {
+        message = `${prefix}: update ${uniqueFileNames[0]}`
+      } else if (uniqueFileNames.length <= 3) {
+        message = `${prefix}: update ${uniqueFileNames.join(", ")}`
+      } else {
+        message = `${prefix}: update ${uniqueFileNames.length} files`
+      }
+
+      console.log("[generateCommitMessageForProject] Generated fallback message:", message)
       return { message }
     }),
 

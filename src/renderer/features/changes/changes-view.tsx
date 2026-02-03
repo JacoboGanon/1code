@@ -218,6 +218,8 @@ const ChangesFileItemWithContext = memo(function ChangesFileItemWithContext({
 interface ChangesViewProps {
 	worktreePath: string;
 	selectedFilePath?: string | null;
+	/** Optional diff state key to scope diff state separate from chatId */
+	diffStateKey?: string;
 	onFileSelect?: (
 		file: ChangedFile,
 		category: ChangeCategory,
@@ -238,6 +240,8 @@ interface ChangesViewProps {
 	initialSubChatFilter?: string | null;
 	/** Chat ID for AI-generated commit messages */
 	chatId?: string;
+	/** Project ID for AI-generated commit messages */
+	projectId?: string;
 	/** Selected commit hash for History tab */
 	selectedCommitHash?: string | null;
 	/** Callback when commit is selected in History tab */
@@ -253,6 +257,7 @@ interface ChangesViewProps {
 export function ChangesView({
 	worktreePath,
 	selectedFilePath,
+	diffStateKey,
 	onFileSelect: onFileSelectProp,
 	onFileOpenPinned,
 	onCreatePr,
@@ -260,6 +265,7 @@ export function ChangesView({
 	subChats = [],
 	initialSubChatFilter = null,
 	chatId,
+	projectId,
 	selectedCommitHash,
 	onCommitSelect,
 	onCommitFileSelect,
@@ -268,8 +274,9 @@ export function ChangesView({
 }: ChangesViewProps) {
 	useFileChangeListener(worktreePath);
 
+	const diffKey = diffStateKey ?? chatId ?? "";
 	// Viewed files state from agents diff view (for showing eye icon and toggling)
-	const [viewedFiles, setViewedFiles] = useAtom(viewedFilesAtomFamily(chatId || ""));
+	const [viewedFiles, setViewedFiles] = useAtom(viewedFilesAtomFamily(diffKey));
 
 	const { baseBranch } = useChangesStore();
 	const { data: branchData } = trpc.changes.getBranches.useQuery(
@@ -322,16 +329,16 @@ export function ChangesView({
 
 	// File viewer (file preview sidebar)
 	const fileViewerAtom = useMemo(
-		() => fileViewerOpenAtomFamily(chatId || ""),
-		[chatId],
+		() => fileViewerOpenAtomFamily(diffKey),
+		[diffKey],
 	);
 	const setFileViewerPath = useSetAtom(fileViewerAtom);
 
 	// Diff sidebar state (to close dialog/fullscreen when opening file preview)
 	const diffDisplayMode = useAtomValue(diffViewDisplayModeAtom);
 	const diffSidebarAtom = useMemo(
-		() => diffSidebarOpenAtomFamily(chatId || ""),
-		[chatId],
+		() => diffSidebarOpenAtomFamily(diffKey),
+		[diffKey],
 	);
 	const setDiffSidebarOpen = useSetAtom(diffSidebarAtom);
 
@@ -943,16 +950,17 @@ export function ChangesView({
 						)}
 
 						{/* Commit input */}
-						<CommitInput
-							worktreePath={worktreePath}
-							hasStagedChanges={selectedCount > 0}
-							onRefresh={handleRefresh}
-							onCommitSuccess={handleCommitSuccess}
-							stagedCount={selectedCount}
-							currentBranch={status.branch}
-							selectedFilePaths={selectedFilePaths}
-							chatId={chatId}
-						/>
+					<CommitInput
+						worktreePath={worktreePath}
+						hasStagedChanges={selectedCount > 0}
+						onRefresh={handleRefresh}
+						onCommitSuccess={handleCommitSuccess}
+						stagedCount={selectedCount}
+						currentBranch={status.branch}
+						selectedFilePaths={selectedFilePaths}
+						chatId={chatId}
+						projectId={projectId}
+					/>
 					</TabsContent>
 
 					{/* History tab content */}

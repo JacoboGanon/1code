@@ -21,6 +21,8 @@ interface CommitInputProps {
 	selectedFilePaths?: string[];
 	/** Chat ID for AI-generated commit messages */
 	chatId?: string;
+	/** Project ID for AI-generated commit messages when chatId is not available */
+	projectId?: string;
 }
 
 export function CommitInput({
@@ -32,6 +34,7 @@ export function CommitInput({
 	currentBranch,
 	selectedFilePaths,
 	chatId,
+	projectId,
 }: CommitInputProps) {
 	const [summary, setSummary] = useState("");
 	const [description, setDescription] = useState("");
@@ -41,6 +44,7 @@ export function CommitInput({
 
 	// AI commit message generation
 	const generateCommitMutation = trpc.chats.generateCommitMessage.useMutation();
+	const generateCommitForProjectMutation = trpc.chats.generateCommitMessageForProject.useMutation();
 
 	// Use atomic commit when we have selected files (safer, single operation)
 	const atomicCommitMutation = trpc.changes.atomicCommit.useMutation({
@@ -90,16 +94,28 @@ export function CommitInput({
 			let commitMessage = getCommitMessage();
 			console.log("[CommitInput] handleCommit called, commitMessage:", commitMessage, "chatId:", chatId);
 
-			if (!commitMessage && chatId) {
+			if (!commitMessage && (chatId || projectId)) {
 				console.log("[CommitInput] No message, generating with AI for files:", selectedFilePaths);
 				setIsGenerating(true);
 				try {
-					// Pass selected file paths to generate message only for those files
-					const result = await generateCommitMutation.mutateAsync({
-						chatId,
-						filePaths: selectedFilePaths,
-						ollamaModel: selectedOllamaModel,
-					});
+					let result: { message: string } | null = null;
+					if (chatId) {
+						// Pass selected file paths to generate message only for those files
+						result = await generateCommitMutation.mutateAsync({
+							chatId,
+							filePaths: selectedFilePaths,
+							ollamaModel: selectedOllamaModel,
+						});
+					} else if (projectId) {
+						result = await generateCommitForProjectMutation.mutateAsync({
+							projectId,
+							filePaths: selectedFilePaths,
+							ollamaModel: selectedOllamaModel,
+						});
+					}
+					if (!result?.message) {
+						throw new Error("No commit message generated");
+					}
 					console.log("[CommitInput] AI generated message:", result.message);
 					commitMessage = result.message;
 					// Also update the input field so user can see what was generated
