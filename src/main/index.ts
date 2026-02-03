@@ -28,6 +28,8 @@ import {
 } from "./lib/cli"
 import { cleanupGitWatchers } from "./lib/git/watcher"
 import { cancelAllPendingOAuth, handleMcpOAuthCallback } from "./lib/mcp-auth"
+import { getApiUrl } from "./lib/config"
+import { setAppStartTime } from "./lib/recent-usage-service"
 import {
   createMainWindow,
   createWindow,
@@ -74,14 +76,11 @@ if (app.isPackaged && !IS_DEV) {
 // In packaged app, ALWAYS use production URL to prevent localhost leaking into releases
 // In dev mode, allow override via MAIN_VITE_API_URL env variable
 export function getBaseUrl(): string {
-  if (app.isPackaged) {
-    return "https://21st.dev"
-  }
-  return import.meta.env.MAIN_VITE_API_URL || "https://21st.dev"
+  return getApiUrl()
 }
 
 export function getAppUrl(): string {
-  return process.env.ELECTRON_RENDERER_URL || "https://21st.dev/agents"
+  return process.env.ELECTRON_RENDERER_URL || `${getApiUrl()}/agents`
 }
 
 // Auth manager singleton (use the one from auth-manager module)
@@ -551,6 +550,9 @@ if (gotTheLock) {
       app.name = "Agents Dev"
     }
 
+    // Initialize app start time for usage tracking session filter
+    setAppStartTime(new Date())
+
     // Register protocol handler (must be after app is ready)
     initialRegistration = registerProtocol()
 
@@ -756,7 +758,7 @@ if (gotTheLock) {
               label: "Learn More",
               click: async () => {
                 const { shell } = await import("electron")
-                await shell.openExternal("https://21st.dev")
+                await shell.openExternal("https://github.com/21st-dev/1code")
               },
             },
           ],
@@ -776,7 +778,7 @@ if (gotTheLock) {
           },
         },
       ])
-      app.dock.setMenu(dockMenu)
+      app.dock?.setMenu(dockMenu)
     }
 
     // Set update state and rebuild menu

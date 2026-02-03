@@ -11,6 +11,7 @@ import {
   systemDarkThemeIdAtom,
   showWorkspaceIconAtom,
   alwaysExpandTodoListAtom,
+  classicChatViewEnabledAtom,
   importedThemesAtom,
   type VSCodeFullTheme,
 } from "../../../lib/atoms"
@@ -148,6 +149,9 @@ export function AgentsAppearanceTab() {
 
   // To-do list preference
   const [alwaysExpandTodoList, setAlwaysExpandTodoList] = useAtom(alwaysExpandTodoListAtom)
+
+  // Classic chat view preference
+  const [classicChatViewEnabled, setClassicChatViewEnabled] = useAtom(classicChatViewEnabledAtom)
 
   // VS Code themes state
   const [isScanning, setIsScanning] = useState(false)
@@ -617,6 +621,20 @@ export function AgentsAppearanceTab() {
           <Switch
             checked={alwaysExpandTodoList}
             onCheckedChange={setAlwaysExpandTodoList}
+          />
+        </div>
+        <div className="flex items-center justify-between p-4 border-t border-border">
+          <div className="flex flex-col space-y-1">
+            <span className="text-sm font-medium text-foreground">
+              Classic chat view
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Use single-workspace layout instead of multi-pane grid
+            </span>
+          </div>
+          <Switch
+            checked={classicChatViewEnabled}
+            onCheckedChange={setClassicChatViewEnabled}
           />
         </div>
       </div>

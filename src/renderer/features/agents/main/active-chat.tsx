@@ -1037,7 +1037,7 @@ interface DiffSidebarContentProps {
   diffStats: { isLoading: boolean; hasChanges: boolean; fileCount: number; additions: number; deletions: number }
   setDiffStats: (stats: { isLoading: boolean; hasChanges: boolean; fileCount: number; additions: number; deletions: number }) => void
   diffContent: string | null
-  parsedFileDiffs: unknown
+  parsedFileDiffs: ParsedDiffFile[] | null
   prefetchedFileContents: Record<string, string> | undefined
   setDiffCollapseState: (state: Map<string, boolean>) => void
   diffViewRef: React.RefObject<{ expandAll: () => void; collapseAll: () => void; getViewedCount: () => number; markAllViewed: () => void; markAllUnviewed: () => void } | null>
@@ -5226,7 +5226,7 @@ export function ChatView({
         let rawDiff: string | null = null
         const response = await fetch(`/api/agents/sandbox/${sandboxId}/diff`)
         if (!response.ok) {
-          setDiffStats((prev) => ({ ...prev, isLoading: false }))
+          setDiffStats((prev: { isLoading: boolean; hasChanges: boolean; fileCount: number; additions: number; deletions: number }) => ({ ...prev, isLoading: false }))
           return
         }
         const data = await response.json()
@@ -5274,7 +5274,7 @@ export function ChatView({
       }
     } catch (error) {
       console.error("[fetchDiffStats] Error:", error)
-      setDiffStats((prev) => ({ ...prev, isLoading: false }))
+      setDiffStats((prev: { isLoading: boolean; hasChanges: boolean; fileCount: number; additions: number; deletions: number }) => ({ ...prev, isLoading: false }))
     } finally {
       console.log("[fetchDiffStats] Done")
       isFetchingDiffRef.current = false

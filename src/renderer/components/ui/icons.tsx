@@ -2891,6 +2891,27 @@ export const KeyboardFilledIcon = (props: IconProps) => {
   )
 }
 
+// Chart icon filled - for Usage tab
+export const ChartFilledIcon = (props: IconProps) => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M3 3C3 2.44772 3.44772 2 4 2C4.55228 2 5 2.44772 5 3V19H21C21.5523 19 22 19.4477 22 20C22 20.5523 21.5523 21 21 21H4C3.44772 21 3 20.5523 3 20V3ZM7 14C7 13.4477 7.44772 13 8 13H9C9.55228 13 10 13.4477 10 14V17C10 17.5523 9.55228 18 9 18H8C7.44772 18 7 17.5523 7 17V14ZM13 9C12.4477 9 12 9.44772 12 10V17C12 17.5523 12.4477 18 13 18H14C14.5523 18 15 17.5523 15 17V10C15 9.44772 14.5523 9 14 9H13ZM17 6C17 5.44772 17.4477 5 18 5H19C19.5523 5 20 5.44772 20 6V17C20 17.5523 19.5523 18 19 18H18C17.4477 18 17 17.5523 17 17V6Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 export const BookIcon = (props: IconProps) => {
   return (
     <svg

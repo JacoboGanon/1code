@@ -632,7 +632,7 @@ export function AgentsSubChatsSidebar({
       useAgentSubChatStore.getState().updateSubChatName(subChatId, newName)
 
       // Remove from justCreatedIds to prevent typewriter animation on manual rename
-      setJustCreatedIds((prev) => {
+      setJustCreatedIds((prev: Set<string>) => {
         if (prev.has(subChatId)) {
           const next = new Set(prev)
           next.delete(subChatId)
@@ -683,7 +683,7 @@ export function AgentsSubChatsSidebar({
     }
 
     // Track this subchat as just created for typewriter effect
-    setJustCreatedIds((prev) => new Set([...prev, newId]))
+    setJustCreatedIds((prev: Set<string>) => new Set([...prev, newId]))
 
     // Initialize atomFamily mode for the new sub-chat
     appStore.set(subChatModeAtomFamily(newId), defaultAgentMode)
@@ -709,8 +709,7 @@ export function AgentsSubChatsSidebar({
       state.addToOpenSubChats(subChat.id)
     }
     state.setActiveSubChat(subChat.id)
-
-    setIsHistoryOpen(false)
+    // Note: SearchCombobox handles closing the popover automatically on select
   }, [])
 
   // Sort sub-chats by most recent first for history

@@ -22,7 +22,7 @@ function SkillDetail({
   onSave,
   isSaving,
 }: {
-  skill: { name: string; description: string; source: "user" | "project"; path: string; content: string }
+  skill: { name: string; description: string; source: "user" | "project" | "plugin"; path: string; content: string }
   onSave: (data: { description: string; content: string }) => void
   isSaving: boolean
 }) {

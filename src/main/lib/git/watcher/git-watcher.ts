@@ -1,7 +1,8 @@
 import { EventEmitter } from "events";
 
 // Chokidar is ESM-only, so we need to dynamically import it
-type FSWatcher = Awaited<ReturnType<typeof import("chokidar")>>["FSWatcher"] extends new () => infer T ? T : never;
+type ChokidarModule = typeof import("chokidar");
+type FSWatcher = ReturnType<ChokidarModule["watch"]>;
 
 // Simple debounce implementation to avoid lodash-es dependency in main process
 function debounce<T extends (...args: unknown[]) => unknown>(
@@ -160,7 +161,7 @@ export class GitWatcher extends EventEmitter {
 				this.pendingChanges.set(path, "unlink");
 				flushChanges();
 			})
-			.on("error", (error: Error) => {
+			.on("error", (error: unknown) => {
 				console.error("[GitWatcher] Error:", error);
 				this.emit("error", error);
 			});

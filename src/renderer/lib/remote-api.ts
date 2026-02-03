@@ -9,7 +9,7 @@ let API_BASE: string | null = null
 
 async function getApiBase(): Promise<string> {
   if (!API_BASE) {
-    API_BASE = await window.desktopApi?.getApiBaseUrl() || "https://21st.dev"
+    API_BASE = await window.desktopApi?.getApiBaseUrl() || "http://localhost:3000"
   }
   return API_BASE
 }
@@ -57,7 +57,7 @@ export const remoteApi = {
    */
   async getTeams(): Promise<Team[]> {
     const teams = await remoteTrpc.teams.getUserTeams.query()
-    return teams.map((t) => ({ id: t.id, name: t.name }))
+    return teams.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name }))
   },
 
   /**

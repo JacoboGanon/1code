@@ -639,6 +639,24 @@ export const claudeRouter = router({
           try {
             const db = getDatabase()
 
+            // 0. Verify working directory exists (common cause of ENOENT errors)
+            const { existsSync } = await import("fs")
+            if (!existsSync(input.cwd)) {
+              safeEmit({
+                type: "error",
+                errorText: `Project folder not found: ${input.cwd}\n\nThe folder may have been moved, renamed, or deleted. Please update the project path or create a new project pointing to the correct location.`,
+                debugInfo: {
+                  context: "Working directory does not exist",
+                  category: "PROJECT_NOT_FOUND",
+                  cwd: input.cwd,
+                  mode: input.mode,
+                },
+              } as UIMessageChunk)
+              safeEmit({ type: "finish" } as UIMessageChunk)
+              safeComplete()
+              return
+            }
+
             // 1. Get existing messages from DB
             const existing = db
               .select()
@@ -983,7 +1001,7 @@ export const claudeRouter = router({
 
             // Build final env - only add OAuth token if we have one AND no existing API config
             // Existing CLI config takes precedence over OAuth
-            const finalEnv = {
+            const finalEnv: Record<string, string | undefined> = {
               ...claudeEnv,
               ...(claudeCodeToken && !hasExistingApiConfig && {
                 CLAUDE_CODE_OAUTH_TOKEN: claudeCodeToken,
@@ -1315,14 +1333,14 @@ ${prompt}
                           : ""
                       if (!/\.md$/i.test(filePath)) {
                         return {
-                          behavior: "deny",
+                          behavior: "deny" as const,
                           message:
                             'Only ".md" files can be modified in plan mode.',
                         }
                       }
                     } else if (PLAN_MODE_BLOCKED_TOOLS.has(toolName)) {
                       return {
-                        behavior: "deny",
+                        behavior: "deny" as const,
                         message: `Tool "${toolName}" blocked in plan mode.`,
                       }
                     }
@@ -1381,7 +1399,7 @@ ${prompt}
                         result: errorMessage,
                       } as UIMessageChunk)
                       return {
-                        behavior: "deny",
+                        behavior: "deny" as const,
                         message: errorMessage,
                       }
                     }
@@ -1400,13 +1418,13 @@ ${prompt}
                       result: answerResult,
                     } as UIMessageChunk)
                     return {
-                      behavior: "allow",
-                      updatedInput: response.updatedInput,
+                      behavior: "allow" as const,
+                      updatedInput: response.updatedInput as Record<string, unknown> | undefined,
                     }
                   }
                   return {
-                    behavior: "allow",
-                    updatedInput: toolInput,
+                    behavior: "allow" as const,
+                    updatedInput: toolInput as Record<string, unknown>,
                   }
                 },
                 stderr: (data: string) => {
@@ -1837,8 +1855,17 @@ ${prompt}
                 errorContext = "Claude Code process crashed"
                 errorCategory = "PROCESS_CRASH"
               } else if (err.message?.includes("ENOENT")) {
-                errorContext = "Required executable not found in PATH"
-                errorCategory = "EXECUTABLE_NOT_FOUND"
+                // ENOENT can mean: executable not found, shell not found, or cwd doesn't exist
+                // We check cwd earlier, so if we get here it's likely the executable or shell
+                const claudeBinaryPath = getBundledClaudeBinaryPath()
+                const { existsSync } = await import("fs")
+                if (!existsSync(claudeBinaryPath)) {
+                  errorContext = `Claude binary not found at ${claudeBinaryPath}. Run 'bun run claude:download' to download it.`
+                  errorCategory = "BINARY_NOT_FOUND"
+                } else {
+                  errorContext = "Failed to spawn Claude process - executable or shell not found"
+                  errorCategory = "SPAWN_ERROR"
+                }
               } else if (
                 err.message?.includes("authentication") ||
                 err.message?.includes("401")

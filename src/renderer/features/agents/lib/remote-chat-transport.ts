@@ -6,8 +6,8 @@ let cachedApiBase: string | null = null
 
 async function getApiBase(): Promise<string> {
   if (!cachedApiBase) {
-    // Uses MAIN_VITE_API_URL in dev, "https://21st.dev" in production
-    cachedApiBase = await window.desktopApi?.getApiBaseUrl() || "https://21st.dev"
+    // Uses MAIN_VITE_API_URL in dev, localhost fallback in production
+    cachedApiBase = await window.desktopApi?.getApiBaseUrl() || "http://localhost:3000"
   }
   return cachedApiBase
 }

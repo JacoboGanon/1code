@@ -15,11 +15,15 @@ import { createId } from "../../db/utils"
 import { publicProcedure, router } from "../index"
 
 /**
- * Get desktop auth token for server API calls
+ * Get desktop auth token for server API calls (optional - returns null if not authenticated)
  */
 async function getDesktopToken(): Promise<string | null> {
-  const authManager = getAuthManager()
-  return authManager.getValidToken()
+  try {
+    const authManager = getAuthManager()
+    return authManager?.getValidToken() ?? null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -170,17 +174,20 @@ export const claudeCodeRouter = router({
 
   /**
    * Start OAuth flow - calls server to create sandbox
+   * Note: 21st.dev auth is optional - if not authenticated, we'll try without token
    */
   startAuth: publicProcedure.mutation(async () => {
     const token = await getDesktopToken()
-    if (!token) {
-      throw new Error("Not authenticated with 21st.dev")
-    }
 
     // Server creates sandbox (has CodeSandbox SDK)
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers["x-desktop-token"] = token
+    }
+
     const response = await fetch(`${getApiUrl()}/api/auth/claude-code/start`, {
       method: "POST",
-      headers: { "x-desktop-token": token },
+      headers,
     })
 
     if (!response.ok) {
