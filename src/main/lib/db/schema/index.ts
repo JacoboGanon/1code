@@ -69,9 +69,12 @@ export const subChats = sqliteTable("sub_chats", {
     .primaryKey()
     .$defaultFn(() => createId()),
   name: text("name"),
+  // chatId is nullable for new pane-based sub-chats that belong directly to a project
   chatId: text("chat_id")
-    .notNull()
     .references(() => chats.id, { onDelete: "cascade" }),
+  // projectId allows sub-chats to belong directly to projects (for multi-pane layout)
+  projectId: text("project_id")
+    .references(() => projects.id, { onDelete: "cascade" }),
   sessionId: text("session_id"), // Claude SDK session ID for resume
   streamId: text("stream_id"), // Track in-progress streams
   mode: text("mode").notNull().default("agent"), // "plan" | "agent"
@@ -88,6 +91,10 @@ export const subChatsRelations = relations(subChats, ({ one }) => ({
   chat: one(chats, {
     fields: [subChats.chatId],
     references: [chats.id],
+  }),
+  project: one(projects, {
+    fields: [subChats.projectId],
+    references: [projects.id],
   }),
 }))
 
