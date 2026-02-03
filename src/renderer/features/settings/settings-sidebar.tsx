@@ -16,6 +16,7 @@ import { cn } from "../../lib/utils"
 import {
   BrainFilledIcon,
   BugFilledIcon,
+  ChartFilledIcon,
   CustomAgentIconFilled,
   FlaskFilledIcon,
   FolderFilledIcon,
@@ -53,6 +54,11 @@ const MAIN_TABS = [
     id: "keyboard" as SettingsTab,
     label: "Keyboard",
     icon: KeyboardFilledIcon,
+  },
+  {
+    id: "usage" as SettingsTab,
+    label: "Usage",
+    icon: ChartFilledIcon,
   },
   {
     id: "beta" as SettingsTab,
