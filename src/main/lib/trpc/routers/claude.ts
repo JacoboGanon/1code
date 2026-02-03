@@ -16,6 +16,7 @@ import {
   type UIMessageChunk,
 } from "../../claude"
 import { getProjectMcpServers, GLOBAL_MCP_PATH, readClaudeConfig, removeMcpServerConfig, resolveProjectPathFromWorktree, updateClaudeConfigAtomic, updateMcpServerConfig, writeClaudeConfig, type McpServerConfig } from "../../claude-config"
+import { isTokenExpired, refreshClaudeToken } from "../../claude-token"
 import { discoverPluginMcpServers } from "../../plugins"
 import { getEnabledPlugins, getApprovedPluginMcpServers } from "./claude-settings"
 import { chats, claudeCodeCredentials, getDatabase, subChats } from "../../db"
@@ -24,6 +25,7 @@ import { ensureMcpTokensFresh, fetchMcpTools, fetchMcpToolsStdio, getMcpAuthStat
 import { fetchOAuthMetadata, getMcpBaseUrl } from "../../oauth"
 import { publicProcedure, router } from "../index"
 import { buildAgentsOption } from "./agent-utils"
+import { getStoredCredentials, updateStoredCredentials } from "./claude-code"
 
 /**
  * Parse @[agent:name], @[skill:name], and @[tool:servername] mentions from prompt text
@@ -126,23 +128,39 @@ function decryptToken(encrypted: string): string {
 
 /**
  * Get Claude Code OAuth token from local SQLite
+ * Now includes automatic token refresh if expired
  * Returns null if not connected
  */
-function getClaudeCodeToken(): string | null {
+async function getClaudeCodeToken(): Promise<string | null> {
   try {
-    const db = getDatabase()
-    const cred = db
-      .select()
-      .from(claudeCodeCredentials)
-      .where(eq(claudeCodeCredentials.id, "default"))
-      .get()
+    const creds = getStoredCredentials()
 
-    if (!cred?.oauthToken) {
+    if (!creds) {
       console.log("[claude] No Claude Code credentials found")
       return null
     }
 
-    return decryptToken(cred.oauthToken)
+    // Check if token needs refresh
+    if (isTokenExpired(creds.expiresAt ?? undefined) && creds.refreshToken) {
+      console.log("[claude] Token expired, attempting refresh...")
+      try {
+        const refreshed = await refreshClaudeToken(creds.refreshToken)
+        // Update stored credentials with new tokens
+        updateStoredCredentials(creds.accountId, {
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken,
+          expiresAt: refreshed.expiresAt,
+        })
+        console.log("[claude] Token refreshed successfully")
+        return refreshed.accessToken
+      } catch (refreshError) {
+        console.error("[claude] Token refresh failed:", refreshError)
+        // Return existing token anyway - it might still work or trigger re-auth
+        return creds.accessToken
+      }
+    }
+
+    return creds.accessToken
   } catch (error) {
     console.error("[claude] Error getting Claude Code token:", error)
     return null
@@ -708,7 +726,7 @@ export const claudeRouter = router({
 
             // 2.5. AUTO-FALLBACK: Check internet and switch to Ollama if offline
             // Only check if offline mode is enabled in settings
-            const claudeCodeToken = getClaudeCodeToken()
+            const claudeCodeToken = await getClaudeCodeToken()
             const offlineResult = await checkOfflineFallback(
               input.customConfig,
               claudeCodeToken,
