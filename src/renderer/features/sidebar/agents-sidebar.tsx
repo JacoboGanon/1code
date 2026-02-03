@@ -28,6 +28,7 @@ import {
   showWorkspaceIconAtom,
   betaKanbanEnabledAtom,
   betaAutomationsEnabledAtom,
+  classicChatViewEnabledAtom,
 } from "../../lib/atoms"
 import {
   useRemoteChats,
@@ -102,6 +103,7 @@ import {
   ChartFilledIcon,
 } from "../../components/ui/icons"
 import { Logo } from "../../components/ui/logo"
+import { ProjectIcon } from "../../components/ui/project-icon"
 import { Input } from "../../components/ui/input"
 import { Button } from "../../components/ui/button"
 import {
@@ -121,6 +123,12 @@ import {
   desktopViewAtom,
   type UndoItem,
 } from "../agents/atoms"
+import {
+  paneLayoutAtomFamily,
+  focusedPaneIdAtom,
+  updatePaneSubChatAtomFamily,
+} from "../agents/atoms/pane-atoms"
+import { findFirstEmptyPane } from "../agents/lib/pane-presets"
 import { NetworkStatus } from "../../components/ui/network-status"
 import { useAgentSubChatStore, OPEN_SUB_CHATS_CHANGE_EVENT } from "../agents/stores/sub-chat-store"
 import { getWindowId } from "../../contexts/WindowContext"
@@ -1762,7 +1770,19 @@ export function AgentsSidebar({
   const showWorkspaceIcon = useAtomValue(showWorkspaceIconAtom)
 
   // Desktop: use selectedProject instead of teams
-  const [selectedProject] = useAtom(selectedProjectAtom)
+  const [selectedProject, setSelectedProject] = useAtom(selectedProjectAtom)
+
+  // PaneGrid mode detection and control
+  const classicChatViewEnabled = useAtomValue(classicChatViewEnabledAtom)
+  const isPaneGridMode = !classicChatViewEnabled && !!selectedProject
+  const paneLayout = useAtomValue(
+    useMemo(() => paneLayoutAtomFamily(selectedProject?.id ?? ""), [selectedProject?.id])
+  )
+  const updatePaneSubChat = useSetAtom(
+    useMemo(() => updatePaneSubChatAtomFamily(selectedProject?.id ?? ""), [selectedProject?.id])
+  )
+  const setFocusedPaneId = useSetAtom(focusedPaneIdAtom)
+  const createSubChatMutation = trpc.chats.createSubChatForProject.useMutation()
 
   // Keep chatSourceModeAtom for backwards compatibility (used in other places)
   const [chatSourceMode, setChatSourceMode] = useAtom(chatSourceModeAtom)
@@ -1934,6 +1954,18 @@ export function AgentsSidebar({
     if (!projects) return new Map()
     return new Map(projects.map((p) => [p.id, p]))
   }, [projects])
+
+  // Filter projects by search query (for PaneGrid mode)
+  const filteredProjects = useMemo(() => {
+    if (!projects) return []
+    if (!searchQuery.trim()) return projects
+    const query = searchQuery.toLowerCase()
+    return projects.filter(
+      (p) =>
+        p.name.toLowerCase().includes(query) ||
+        p.path.toLowerCase().includes(query)
+    )
+  }, [projects, searchQuery])
 
   // Fetch all archived chats (to get count)
   const { data: archivedChats } = trpc.chats.listArchived.useQuery({})
@@ -2546,8 +2578,47 @@ export function AgentsSidebar({
     return chatIds
   }, [pendingQuestions])
 
-  const handleNewAgent = () => {
+  const handleNewAgent = async () => {
     triggerHaptic("light")
+
+    // In PaneGrid mode, create a new sub-chat and assign to an empty pane
+    if (isPaneGridMode && selectedProject) {
+      try {
+        // Find an empty pane
+        const emptyPaneId = findFirstEmptyPane(paneLayout)
+        if (!emptyPaneId) {
+          // All panes are occupied - focus the first pane instead
+          if (paneLayout.panes.length > 0) {
+            setFocusedPaneId(paneLayout.panes[0].id)
+          }
+          toast.info("All panes are occupied", {
+            description: "Clear an existing pane to start a new workspace",
+          })
+          return
+        }
+
+        // Create new sub-chat for the project
+        const newSubChat = await createSubChatMutation.mutateAsync({
+          projectId: selectedProject.id,
+          mode: "plan",
+        })
+
+        // Assign to pane and focus
+        updatePaneSubChat({ paneId: emptyPaneId, subChatId: newSubChat.id })
+        setFocusedPaneId(emptyPaneId)
+
+        // Invalidate cache
+        utils.chats.listSubChatsByProject.invalidate({ projectId: selectedProject.id })
+      } catch (error) {
+        console.error("[AgentsSidebar] Failed to create workspace:", error)
+        toast.error("Failed to create workspace", {
+          description: error instanceof Error ? error.message : "Unknown error",
+        })
+      }
+      return
+    }
+
+    // Classic mode: show NewChatForm
     setSelectedChatId(null)
     setSelectedDraftId(null) // Clear selected draft so form starts empty
     setShowNewChatForm(true) // Explicitly show new chat form
@@ -2555,6 +2626,72 @@ export function AgentsSidebar({
     // On mobile, switch to chat mode to show NewChatForm
     if (isMobileFullscreen && onChatSelect) {
       onChatSelect()
+    }
+  }
+
+  // Handle project selection in PaneGrid mode
+  const handleProjectClick = useCallback((projectId: string) => {
+    const project = projects?.find((p) => p.id === projectId)
+    if (project) {
+      setSelectedProject({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+        gitRemoteUrl: project.gitRemoteUrl,
+        gitProvider: project.gitProvider as "github" | "gitlab" | "bitbucket" | null,
+        gitOwner: project.gitOwner,
+        gitRepo: project.gitRepo,
+      })
+      setDesktopView(null) // Clear any desktop view to show pane grid
+      // On mobile, switch to chat mode
+      if (isMobileFullscreen && onChatSelect) {
+        onChatSelect()
+      }
+    }
+  }, [projects, setSelectedProject, setDesktopView, isMobileFullscreen, onChatSelect])
+
+  // Open folder mutation for adding projects
+  const openFolderMutation = trpc.projects.openFolder.useMutation({
+    onSuccess: (project) => {
+      if (project) {
+        // Update projects cache
+        utils.projects.list.setData(undefined, (oldData) => {
+          if (!oldData) return [project]
+          const exists = oldData.some((p) => p.id === project.id)
+          if (exists) {
+            return oldData.map((p) =>
+              p.id === project.id ? { ...p, updatedAt: project.updatedAt } : p
+            )
+          }
+          return [project, ...oldData]
+        })
+
+        // Select the new project
+        setSelectedProject({
+          id: project.id,
+          name: project.name,
+          path: project.path,
+          gitRemoteUrl: project.gitRemoteUrl,
+          gitProvider: project.gitProvider as "github" | "gitlab" | "bitbucket" | null,
+          gitOwner: project.gitOwner,
+          gitRepo: project.gitRepo,
+        })
+      }
+    },
+    onError: (error) => {
+      toast.error("Failed to add project", {
+        description: error.message,
+      })
+    },
+  })
+
+  // Handle adding a new project in PaneGrid mode
+  const handleAddProject = async () => {
+    triggerHaptic("light")
+    try {
+      await openFolderMutation.mutateAsync()
+    } catch {
+      // Error handled by onError callback
     }
   }
 
@@ -3097,14 +3234,14 @@ export function AgentsSidebar({
         closeButtonRef={closeButtonRef}
       />
 
-      {/* Search and New Workspace */}
+      {/* Search and New Workspace/Project */}
       <div className="px-2 pb-3 flex-shrink-0">
         <div className="space-y-2">
           {/* Search Input */}
           <div className="relative">
             <Input
               ref={searchInputRef}
-              placeholder="Search workspaces..."
+              placeholder={isPaneGridMode ? "Search projects..." : "Search workspaces..."}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -3117,20 +3254,22 @@ export function AgentsSidebar({
 
                 if (e.key === "ArrowDown") {
                   e.preventDefault()
+                  const listLength = isPaneGridMode ? (filteredProjects?.length ?? 0) : filteredChats.length
                   setFocusedChatIndex((prev) => {
                     // If no focus yet, start from first item
                     if (prev === -1) return 0
                     // Otherwise move down
-                    return prev < filteredChats.length - 1 ? prev + 1 : prev
+                    return prev < listLength - 1 ? prev + 1 : prev
                   })
                   return
                 }
 
                 if (e.key === "ArrowUp") {
                   e.preventDefault()
+                  const listLength = isPaneGridMode ? (filteredProjects?.length ?? 0) : filteredChats.length
                   setFocusedChatIndex((prev) => {
                     // If no focus yet, start from last item
-                    if (prev === -1) return filteredChats.length - 1
+                    if (prev === -1) return listLength - 1
                     // Otherwise move up
                     return prev > 0 ? prev - 1 : prev
                   })
@@ -3141,11 +3280,20 @@ export function AgentsSidebar({
                   e.preventDefault()
                   // Only open if something is focused (not -1)
                   if (focusedChatIndex >= 0) {
-                    const focusedChat = filteredChats[focusedChatIndex]
-                    if (focusedChat) {
-                      handleChatClick(focusedChat.id)
-                      searchInputRef.current?.blur()
-                      setFocusedChatIndex(-1) // Reset focus after selection
+                    if (isPaneGridMode) {
+                      const focusedProject = filteredProjects?.[focusedChatIndex]
+                      if (focusedProject) {
+                        handleProjectClick(focusedProject.id)
+                        searchInputRef.current?.blur()
+                        setFocusedChatIndex(-1)
+                      }
+                    } else {
+                      const focusedChat = filteredChats[focusedChatIndex]
+                      if (focusedChat) {
+                        handleChatClick(focusedChat.id)
+                        searchInputRef.current?.blur()
+                        setFocusedChatIndex(-1) // Reset focus after selection
+                      }
                     }
                   }
                   return
@@ -3157,11 +3305,11 @@ export function AgentsSidebar({
               )}
             />
           </div>
-          {/* New Workspace Button */}
+          {/* New Workspace/Project Button */}
           <Tooltip delayDuration={500}>
             <TooltipTrigger asChild>
               <ButtonCustom
-                onClick={handleNewAgent}
+                onClick={isPaneGridMode ? handleAddProject : handleNewAgent}
                 variant="outline"
                 size="sm"
                 className={cn(
@@ -3169,12 +3317,12 @@ export function AgentsSidebar({
                   isMobileFullscreen ? "h-10" : "h-7",
                 )}
               >
-                <span className="text-sm font-medium">New Workspace</span>
+                <span className="text-sm font-medium">{isPaneGridMode ? "Add Project" : "New Workspace"}</span>
               </ButtonCustom>
             </TooltipTrigger>
             <TooltipContent side="right" className="flex flex-col items-start gap-1">
-              <span>Start a new workspace</span>
-              {newWorkspaceHotkey && (
+              <span>{isPaneGridMode ? "Add a new project" : "Start a new workspace"}</span>
+              {!isPaneGridMode && newWorkspaceHotkey && (
                 <span className="flex items-center gap-1.5">
                   <Kbd>{newWorkspaceHotkey}</Kbd>
                   {newWorkspaceAltHotkey && <><span className="text-[10px] opacity-50">or</span><Kbd>{newWorkspaceAltHotkey}</Kbd></>}
@@ -3238,96 +3386,140 @@ export function AgentsSidebar({
             </div>
           )}
 
-          {/* Chats Section */}
-          {filteredChats.length > 0 ? (
-            <div className={cn("mb-4", isMultiSelectMode ? "px-0" : "-mx-1")}>
-              {/* Pinned section */}
-              <ChatListSection
-                title="Pinned workspaces"
-                chats={pinnedAgents}
-                selectedChatId={selectedChatId}
-                selectedChatIsRemote={selectedChatIsRemote}
-                focusedChatIndex={focusedChatIndex}
-                loadingChatIds={loadingChatIds}
-                unseenChanges={unseenChanges}
-                workspacePendingPlans={workspacePendingPlans}
-                workspacePendingQuestions={workspacePendingQuestions}
-                isMultiSelectMode={isMultiSelectMode}
-                selectedChatIds={selectedChatIds}
-                isMobileFullscreen={isMobileFullscreen}
-                isDesktop={isDesktop}
-                pinnedChatIds={pinnedChatIds}
-                projectsMap={projectsMap}
-                workspaceFileStats={workspaceFileStats}
-                filteredChats={filteredChats}
-                canShowPinOption={canShowPinOption}
-                areAllSelectedPinned={areAllSelectedPinned}
-                showIcon={showWorkspaceIcon}
-                onChatClick={handleChatClick}
-                onCheckboxClick={handleCheckboxClick}
-                onMouseEnter={handleAgentMouseEnter}
-                onMouseLeave={handleAgentMouseLeave}
-                onArchive={handleArchiveSingle}
-                onTogglePin={handleTogglePin}
-                onRenameClick={handleRenameClick}
-                onCopyBranch={handleCopyBranch}
-                onArchiveAllBelow={handleArchiveAllBelow}
-                onArchiveOthers={handleArchiveOthers}
-                onOpenLocally={handleOpenLocally}
-                onBulkPin={handleBulkPin}
-                onBulkUnpin={handleBulkUnpin}
-                onBulkArchive={handleBulkArchive}
-                archivePending={archiveChatMutation.isPending || archiveRemoteChatMutation.isPending}
-                archiveBatchPending={archiveChatsBatchMutation.isPending || archiveRemoteChatsBatchMutation.isPending}
-                nameRefCallback={nameRefCallback}
-                formatTime={formatTime}
-                justCreatedIds={justCreatedIds}
-              />
-
-              {/* Unpinned section */}
-              <ChatListSection
-                title={pinnedAgents.length > 0 ? "Recent workspaces" : "Workspaces"}
-                chats={unpinnedAgents}
-                selectedChatId={selectedChatId}
-                selectedChatIsRemote={selectedChatIsRemote}
-                focusedChatIndex={focusedChatIndex}
-                loadingChatIds={loadingChatIds}
-                unseenChanges={unseenChanges}
-                workspacePendingPlans={workspacePendingPlans}
-                workspacePendingQuestions={workspacePendingQuestions}
-                isMultiSelectMode={isMultiSelectMode}
-                selectedChatIds={selectedChatIds}
-                isMobileFullscreen={isMobileFullscreen}
-                isDesktop={isDesktop}
-                pinnedChatIds={pinnedChatIds}
-                projectsMap={projectsMap}
-                workspaceFileStats={workspaceFileStats}
-                filteredChats={filteredChats}
-                canShowPinOption={canShowPinOption}
-                areAllSelectedPinned={areAllSelectedPinned}
-                showIcon={showWorkspaceIcon}
-                onChatClick={handleChatClick}
-                onCheckboxClick={handleCheckboxClick}
-                onMouseEnter={handleAgentMouseEnter}
-                onMouseLeave={handleAgentMouseLeave}
-                onArchive={handleArchiveSingle}
-                onTogglePin={handleTogglePin}
-                onRenameClick={handleRenameClick}
-                onCopyBranch={handleCopyBranch}
-                onArchiveAllBelow={handleArchiveAllBelow}
-                onArchiveOthers={handleArchiveOthers}
-                onOpenLocally={handleOpenLocally}
-                onBulkPin={handleBulkPin}
-                onBulkUnpin={handleBulkUnpin}
-                onBulkArchive={handleBulkArchive}
-                archivePending={archiveChatMutation.isPending || archiveRemoteChatMutation.isPending}
-                archiveBatchPending={archiveChatsBatchMutation.isPending || archiveRemoteChatsBatchMutation.isPending}
-                nameRefCallback={nameRefCallback}
-                formatTime={formatTime}
-                justCreatedIds={justCreatedIds}
-              />
+          {/* Projects Section (PaneGrid mode) */}
+          {isPaneGridMode ? (
+            <div className={cn("mb-4", "-mx-1")}>
+              <div className="flex items-center h-4 mb-1 pl-2">
+                <h3 className="text-xs font-medium text-muted-foreground whitespace-nowrap">
+                  Projects
+                </h3>
+              </div>
+              <div className="list-none p-0 m-0">
+                {filteredProjects && filteredProjects.length > 0 ? (
+                  filteredProjects.map((project, index) => {
+                    const isSelected = selectedProject?.id === project.id
+                    const isFocused = focusedChatIndex === index
+                    return (
+                      <button
+                        key={project.id}
+                        onClick={() => handleProjectClick(project.id)}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors",
+                          "hover:bg-muted/50",
+                          isSelected && "bg-muted",
+                          isFocused && "ring-1 ring-ring"
+                        )}
+                      >
+                        <ProjectIcon
+                          project={project}
+                          className="h-4 w-4 flex-shrink-0"
+                        />
+                        <span className="truncate flex-1 text-left">{project.name}</span>
+                        {isSelected && (
+                          <span className="text-xs text-muted-foreground">Selected</span>
+                        )}
+                      </button>
+                    )
+                  })
+                ) : (
+                  <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                    {searchQuery ? "No projects match your search" : "No projects yet. Click \"Add Project\" to get started."}
+                  </div>
+                )}
+              </div>
             </div>
-          ) : null}
+          ) : (
+            /* Chats Section (Classic mode) */
+            filteredChats.length > 0 ? (
+              <div className={cn("mb-4", isMultiSelectMode ? "px-0" : "-mx-1")}>
+                {/* Pinned section */}
+                <ChatListSection
+                  title="Pinned workspaces"
+                  chats={pinnedAgents}
+                  selectedChatId={selectedChatId}
+                  selectedChatIsRemote={selectedChatIsRemote}
+                  focusedChatIndex={focusedChatIndex}
+                  loadingChatIds={loadingChatIds}
+                  unseenChanges={unseenChanges}
+                  workspacePendingPlans={workspacePendingPlans}
+                  workspacePendingQuestions={workspacePendingQuestions}
+                  isMultiSelectMode={isMultiSelectMode}
+                  selectedChatIds={selectedChatIds}
+                  isMobileFullscreen={isMobileFullscreen}
+                  isDesktop={isDesktop}
+                  pinnedChatIds={pinnedChatIds}
+                  projectsMap={projectsMap}
+                  workspaceFileStats={workspaceFileStats}
+                  filteredChats={filteredChats}
+                  canShowPinOption={canShowPinOption}
+                  areAllSelectedPinned={areAllSelectedPinned}
+                  showIcon={showWorkspaceIcon}
+                  onChatClick={handleChatClick}
+                  onCheckboxClick={handleCheckboxClick}
+                  onMouseEnter={handleAgentMouseEnter}
+                  onMouseLeave={handleAgentMouseLeave}
+                  onArchive={handleArchiveSingle}
+                  onTogglePin={handleTogglePin}
+                  onRenameClick={handleRenameClick}
+                  onCopyBranch={handleCopyBranch}
+                  onArchiveAllBelow={handleArchiveAllBelow}
+                  onArchiveOthers={handleArchiveOthers}
+                  onOpenLocally={handleOpenLocally}
+                  onBulkPin={handleBulkPin}
+                  onBulkUnpin={handleBulkUnpin}
+                  onBulkArchive={handleBulkArchive}
+                  archivePending={archiveChatMutation.isPending || archiveRemoteChatMutation.isPending}
+                  archiveBatchPending={archiveChatsBatchMutation.isPending || archiveRemoteChatsBatchMutation.isPending}
+                  nameRefCallback={nameRefCallback}
+                  formatTime={formatTime}
+                  justCreatedIds={justCreatedIds}
+                />
+
+                {/* Unpinned section */}
+                <ChatListSection
+                  title={pinnedAgents.length > 0 ? "Recent workspaces" : "Workspaces"}
+                  chats={unpinnedAgents}
+                  selectedChatId={selectedChatId}
+                  selectedChatIsRemote={selectedChatIsRemote}
+                  focusedChatIndex={focusedChatIndex}
+                  loadingChatIds={loadingChatIds}
+                  unseenChanges={unseenChanges}
+                  workspacePendingPlans={workspacePendingPlans}
+                  workspacePendingQuestions={workspacePendingQuestions}
+                  isMultiSelectMode={isMultiSelectMode}
+                  selectedChatIds={selectedChatIds}
+                  isMobileFullscreen={isMobileFullscreen}
+                  isDesktop={isDesktop}
+                  pinnedChatIds={pinnedChatIds}
+                  projectsMap={projectsMap}
+                  workspaceFileStats={workspaceFileStats}
+                  filteredChats={filteredChats}
+                  canShowPinOption={canShowPinOption}
+                  areAllSelectedPinned={areAllSelectedPinned}
+                  showIcon={showWorkspaceIcon}
+                  onChatClick={handleChatClick}
+                  onCheckboxClick={handleCheckboxClick}
+                  onMouseEnter={handleAgentMouseEnter}
+                  onMouseLeave={handleAgentMouseLeave}
+                  onArchive={handleArchiveSingle}
+                  onTogglePin={handleTogglePin}
+                  onRenameClick={handleRenameClick}
+                  onCopyBranch={handleCopyBranch}
+                  onArchiveAllBelow={handleArchiveAllBelow}
+                  onArchiveOthers={handleArchiveOthers}
+                  onOpenLocally={handleOpenLocally}
+                  onBulkPin={handleBulkPin}
+                  onBulkUnpin={handleBulkUnpin}
+                  onBulkArchive={handleBulkArchive}
+                  archivePending={archiveChatMutation.isPending || archiveRemoteChatMutation.isPending}
+                  archiveBatchPending={archiveChatsBatchMutation.isPending || archiveRemoteChatsBatchMutation.isPending}
+                  nameRefCallback={nameRefCallback}
+                  formatTime={formatTime}
+                  justCreatedIds={justCreatedIds}
+                />
+              </div>
+            ) : null
+          )}
         </div>
 
         {/* Top gradient fade (appears when scrolled down) */}

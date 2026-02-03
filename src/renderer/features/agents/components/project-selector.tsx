@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { useAtom } from "jotai"
+import { toast } from "sonner"
 import {
   Popover,
   PopoverContent,
@@ -82,6 +83,11 @@ export function ProjectSelector() {
         })
       }
     },
+    onError: (error) => {
+      toast.error("Failed to open folder", {
+        description: error.message,
+      })
+    },
   })
 
   // Clone from GitHub mutation
@@ -116,16 +122,29 @@ export function ProjectSelector() {
         setGithubUrl("")
       }
     },
+    onError: (error) => {
+      toast.error("Failed to clone repository", {
+        description: error.message,
+      })
+    },
   })
 
   const handleOpenFolder = async () => {
     setOpen(false)
-    await openFolder.mutateAsync()
+    try {
+      await openFolder.mutateAsync()
+    } catch {
+      // Error is handled by onError callback
+    }
   }
 
   const handleCloneFromGitHub = async () => {
     if (!githubUrl.trim()) return
-    await cloneFromGitHub.mutateAsync({ repoUrl: githubUrl.trim() })
+    try {
+      await cloneFromGitHub.mutateAsync({ repoUrl: githubUrl.trim() })
+    } catch {
+      // Error is handled by onError callback
+    }
   }
 
   const handleSelectProject = (projectId: string) => {

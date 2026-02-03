@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useAtom } from "jotai"
 import { ChevronLeft } from "lucide-react"
+import { toast } from "sonner"
 
 import { IconSpinner, GitHubIcon } from "../../components/ui/icons"
 import { Logo } from "../../components/ui/logo"
@@ -49,6 +50,11 @@ export function SelectRepoPage() {
         })
       }
     },
+    onError: (error) => {
+      toast.error("Failed to open folder", {
+        description: error.message,
+      })
+    },
   })
 
   // Clone from GitHub mutation
@@ -83,15 +89,28 @@ export function SelectRepoPage() {
         setGithubUrl("")
       }
     },
+    onError: (error) => {
+      toast.error("Failed to clone repository", {
+        description: error.message,
+      })
+    },
   })
 
   const handleOpenFolder = async () => {
-    await openFolder.mutateAsync()
+    try {
+      await openFolder.mutateAsync()
+    } catch {
+      // Error is handled by onError callback
+    }
   }
 
   const handleCloneFromGitHub = async () => {
     if (!githubUrl.trim()) return
-    await cloneFromGitHub.mutateAsync({ repoUrl: githubUrl.trim() })
+    try {
+      await cloneFromGitHub.mutateAsync({ repoUrl: githubUrl.trim() })
+    } catch {
+      // Error is handled by onError callback
+    }
   }
 
   const handleBack = () => {
