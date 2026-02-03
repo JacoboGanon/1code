@@ -70,7 +70,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:set-badge", (event, count: number | null) => {
     const win = getWindowFromEvent(event)
     if (process.platform === "darwin") {
-      app.dock.setBadge(count ? String(count) : "")
+      app.dock?.setBadge(count ? String(count) : "")
     } else if (process.platform === "win32" && win) {
       // Windows: Update title with count as fallback
       if (count !== null && count > 0) {
@@ -636,57 +636,37 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
     // windowManager handles cleanup via 'closed' event listener
   })
 
-  // Load the renderer - check auth first
+  // Load the renderer - no auth required
   const devServerUrl = process.env.ELECTRON_RENDERER_URL
-  const authManager = getAuthManager()
 
-  console.log("[Main] ========== AUTH CHECK ==========")
-  console.log("[Main] AuthManager exists:", !!authManager)
-  const isAuth = authManager.isAuthenticated()
-  console.log("[Main] isAuthenticated():", isAuth)
-  const user = authManager.getUser()
-  console.log("[Main] getUser():", user ? user.email : "null")
-  console.log("[Main] ================================")
+  console.log("[Main] Loading app (no auth required)")
+  // Get stable window ID from manager (assigned during register)
+  // "main" for first window, "window-2", "window-3", etc. for additional windows
+  const windowId = windowManager.getStableId(window)
 
-  if (isAuth) {
-    console.log("[Main] ✓ User authenticated, loading app")
-    // Get stable window ID from manager (assigned during register)
-    // "main" for first window, "window-2", "window-3", etc. for additional windows
-    const windowId = windowManager.getStableId(window)
+  // Build URL params including optional chatId/subChatId
+  const buildParams = (params: URLSearchParams) => {
+    params.set("windowId", windowId)
+    if (options?.chatId) params.set("chatId", options.chatId)
+    if (options?.subChatId) params.set("subChatId", options.subChatId)
+  }
 
-    // Build URL params including optional chatId/subChatId
-    const buildParams = (params: URLSearchParams) => {
-      params.set("windowId", windowId)
-      if (options?.chatId) params.set("chatId", options.chatId)
-      if (options?.subChatId) params.set("subChatId", options.subChatId)
-    }
-
-    if (devServerUrl) {
-      // Pass params via query for dev mode
-      const url = new URL(devServerUrl)
-      buildParams(url.searchParams)
-      window.loadURL(url.toString())
-      // Only open devtools for first window in development
-      if (!app.isPackaged && windowId === "main") {
-        window.webContents.openDevTools()
-      }
-    } else {
-      // Pass params via hash for production (file:// URLs)
-      const hashParams = new URLSearchParams()
-      buildParams(hashParams)
-      window.loadFile(join(__dirname, "../renderer/index.html"), {
-        hash: hashParams.toString(),
-      })
+  if (devServerUrl) {
+    // Pass params via query for dev mode
+    const url = new URL(devServerUrl)
+    buildParams(url.searchParams)
+    window.loadURL(url.toString())
+    // Only open devtools for first window in development
+    if (!app.isPackaged && windowId === "main") {
+      window.webContents.openDevTools()
     }
   } else {
-    console.log("[Main] ✗ Not authenticated, showing login page")
-    // In dev mode, login.html is in src/renderer
-    if (devServerUrl) {
-      const loginPath = join(app.getAppPath(), "src/renderer/login.html")
-      window.loadFile(loginPath)
-    } else {
-      window.loadFile(join(__dirname, "../renderer/login.html"))
-    }
+    // Pass params via hash for production (file:// URLs)
+    const hashParams = new URLSearchParams()
+    buildParams(hashParams)
+    window.loadFile(join(__dirname, "../renderer/index.html"), {
+      hash: hashParams.toString(),
+    })
   }
 
   // Ensure native traffic lights are visible after page load
